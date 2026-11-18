@@ -67,7 +67,7 @@ BUTTONS: dict[str, ButtonSpec] = dict(sorted({
     "26 mm": ButtonSpec(size=26, cut=37, fold=31, art=26, safe=24),
     "32 mm": ButtonSpec(size=32, cut=44, fold=41, art=32, safe=30),
     "33 mm": ButtonSpec(size=33, cut=44, fold=41, art=33, safe=30),
-    "35 mm": ButtonSpec(size=35, cut=46, fold=41, art=35, safe=32),
+    "35 mm": ButtonSpec(size=35, cut=48, fold=41, art=35, safe=32),
     "37 mm": ButtonSpec(size=37, cut=46, fold=41, art=37, safe=34),
     "38 mm": ButtonSpec(size=38, cut=48, fold=44, art=38, safe=34),
     "44 mm": ButtonSpec(size=44, cut=54, fold=49, art=44, safe=40),
