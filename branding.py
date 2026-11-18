@@ -106,15 +106,6 @@ h1,h2,h3,h4{font-family:"Gochi Hand",cursive !important;font-weight:400 !importa
   font-family:"Gochi Hand",cursive;font-size:1.5rem;letter-spacing:.04em}
 .side-t::before{content:"";width:.6rem;height:.6rem;border-radius:50%;background:var(--accent);flex:none}
 
-/* Painel de configuração da folha: título sem marcador e com quebra responsiva. */
-.sheet-config-title{display:block;max-width:100%;margin:.15rem 0 .55rem;color:#fff;
-  font-family:"Gochi Hand",cursive;font-size:clamp(1.02rem,1.35vw,1.28rem);
-  line-height:1.12;letter-spacing:.025em;white-space:normal;overflow-wrap:anywhere}
-/* Centraliza o canvas dentro do painel, mantendo 760 px quando houver espaço. */
-.st-key-sheet_canvas_panel [data-testid="stImage"]{display:flex;width:100%;justify-content:center;align-items:center}
-.st-key-sheet_canvas_panel [data-testid="stImage"] img{display:block;width:760px !important;
-  max-width:100% !important;height:auto !important;margin-inline:auto;object-fit:contain}
-
 /* ---------- legenda das guias ---------- */
 .legend{display:grid;gap:.5rem;margin:.3rem 0 .5rem}
 .lg{display:flex;align-items:center;gap:.65rem;font-size:.92rem;color:#E8E8EE}

@@ -136,18 +136,3 @@ polegada. Como monitores e escalas do Windows variam, encoste uma régua física
 na linha de calibração de 50 mm e ajuste o controle até que a linha tenha
 exatamente 50 mm. O fator é salvo neste navegador; refaça a calibração ao
 trocar de monitor ou modificar o zoom do navegador/sistema.
-
-ATUALIZACAO DA AREA FOLHA DE IMPRESSAO
--------------------------------------
-- A prévia está centralizada em um painel próprio, ao lado das configurações,
-  mantendo largura de até 760 px.
-- O gabarito disponível na barra lateral é SVG vetorial A4 (210 × 297 mm),
-  com as guias dimensionadas em milímetros para importação em editor gráfico.
-- A disposição é escolhida pelas opções “Grade: X por folha” e
-  “Hexagonal: Y por folha”, que também informam a capacidade calculada.
-- Quando houver mais de uma página, use os controles Página anterior,
-  Próxima página ou o seletor de página para percorrer a prévia. O visualizador
-  em tela cheia acompanha a página selecionada, enquanto o PDF exportado
-  continua incluindo o lote completo.
-- A instrução de impressão 1:1 aparece junto do botão Imprimir PDF, somente
-  depois que o PDF estiver pronto.

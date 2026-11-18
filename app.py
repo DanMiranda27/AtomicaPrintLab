@@ -76,7 +76,7 @@ BUTTONS: dict[str, ButtonSpec] = dict(sorted({
     "50 × 50 mm (quadrado)": ButtonSpec(
         size=50, cut=61, fold=58, art=50, safe=47, shape="square"
     ),
-    "58 mm": ButtonSpec(size=58, cut=70, fold=64, art=58, safe=54),
+    "58 mm": ButtonSpec(size=58, cut=68, fold=64, art=58, safe=54),
     "65 mm": ButtonSpec(size=65, cut=75, fold=71, art=65, safe=61),
     "88 mm": ButtonSpec(size=88, cut=98, fold=94, art=88, safe=84),
 }.items(), key=lambda item: item[1].size))
@@ -1808,35 +1808,13 @@ def get_sheet_real_size_viewer_component():
             <span id="atomica-real-size-meta">Folha · escala física calibrável</span>
           </div>
           <div class="atomica-real-size-calibration">
-            <label for="atomica-real-size-scale">Calibração física da tela <output id="atomica-real-size-scale-value">100,00%</output></label>
-            <div class="atomica-real-size-calibration-stepper" aria-label="Ajuste fino da calibração">
-              <button type="button" id="atomica-real-size-scale-minus" aria-label="Diminuir calibração">−</button>
-              <span>Incremento: 0,01%</span>
-              <button type="button" id="atomica-real-size-scale-plus" aria-label="Aumentar calibração">+</button>
-            </div>
-            <input id="atomica-real-size-scale" type="range" min="0.50" max="2.00" step="0.0001" value="1">
-            <small>Ajuste a régua de referência para medir exatamente 100 mm. Use − e + para correções finas de 0,01%. A mesma escala será aplicada a todos os tamanhos.</small>
+            <label for="atomica-real-size-scale">Calibração da tela <output id="atomica-real-size-scale-value">100%</output></label>
+            <input id="atomica-real-size-scale" type="range" min="0.50" max="2.00" step="0.005" value="1">
+            <small>Ajuste a linha abaixo para medir exatamente 50 mm com uma régua física.</small>
             <div class="atomica-real-size-ruler-wrap">
-              <svg class="atomica-real-size-ruler" id="atomica-real-size-ruler" viewBox="0 0 1000 24" preserveAspectRatio="none" role="img" aria-label="Régua de referência de 100 milímetros">
-                <line x1="0" y1="22" x2="1000" y2="22" />
-                <g id="atomica-real-size-ruler-ticks"></g>
-              </svg>
-              <div class="atomica-real-size-ruler-labels"><span>0</span><span>50 mm</span><span>100 mm</span></div>
+              <span class="atomica-real-size-ruler" id="atomica-real-size-ruler"></span>
+              <b>50 mm</b>
             </div>
-            <details class="atomica-real-size-checks">
-              <summary>Conferir diâmetros de corte dos bottons de 44 mm e 58 mm</summary>
-              <div class="atomica-real-size-checks-row">
-                <div class="atomica-real-size-check-item">
-                  <span class="atomica-real-size-check-circle" id="atomica-real-size-check-54"></span>
-                  <b>54 mm · corte do botton 44 mm</b>
-                </div>
-                <div class="atomica-real-size-check-item">
-                  <span class="atomica-real-size-check-circle" id="atomica-real-size-check-70"></span>
-                  <b>70 mm · corte do botton 58 mm</b>
-                </div>
-              </div>
-              <small>Os círculos representam o diâmetro externo de CORTE (54 e 70 mm), não a face nominal da arte. Ambos devem coincidir com os respectivos gabaritos físicos usando a mesma calibração.</small>
-            </details>
           </div>
           <button type="button" class="atomica-real-size-close" id="atomica-real-size-close">Fechar ×</button>
         </header>
@@ -1875,26 +1853,15 @@ def get_sheet_real_size_viewer_component():
     .atomica-real-size-calibration { display:flex; flex:1 1 370px; flex-direction:column; gap:4px; min-width:260px; }
     .atomica-real-size-calibration label { color:#E7F0F8; font-size:12px; font-weight:700; }
     .atomica-real-size-calibration output { color:#69D3E5; margin-left:7px; font-variant-numeric:tabular-nums; }
-    .atomica-real-size-calibration-stepper { display:flex; align-items:center; gap:9px; width:min(100%,390px); }
-    .atomica-real-size-calibration-stepper button {
-      display:inline-flex; align-items:center; justify-content:center; width:31px; height:28px;
-      border:1px solid #547995; border-radius:6px; background:#203E59; color:#F4F7FB;
-      font-size:19px; line-height:1; font-weight:700; cursor:pointer;
-    }
-    .atomica-real-size-calibration-stepper button:hover { background:#2B587A; border-color:#80B8D4; }
-    .atomica-real-size-calibration-stepper span { color:#AFC4D6; font-size:10px; flex:1; }
     .atomica-real-size-calibration input { width:min(100%,390px); accent-color:#26C6DA; margin:0; }
-    .atomica-real-size-calibration small { color:#B7C8D9; font-size:10.5px; line-height:1.35; }
+    .atomica-real-size-calibration small { color:#B7C8D9; font-size:10.5px; }
     .atomica-real-size-ruler-wrap { display:flex; flex-direction:column; align-items:flex-start; gap:2px; }
-    .atomica-real-size-ruler { display:block; width:1px; height:24px; overflow:visible; }
-    .atomica-real-size-ruler line { stroke:#F7D77B; stroke-width:1.15; vector-effect:non-scaling-stroke; stroke-linecap:square; }
-    .atomica-real-size-ruler-labels { display:flex; justify-content:space-between; width:min(100%,390px); color:#F7D77B; font-size:9px; font-variant-numeric:tabular-nums; }
-    .atomica-real-size-checks { margin-top:3px; color:#D6E3EF; font-size:10.5px; }
-    .atomica-real-size-checks summary { cursor:pointer; color:#86D8E6; font-weight:700; }
-    .atomica-real-size-checks-row { display:flex; align-items:flex-start; flex-wrap:wrap; gap:16px; padding:9px 2px 5px; }
-    .atomica-real-size-check-item { display:flex; flex-direction:column; align-items:center; gap:4px; color:#F7D77B; }
-    .atomica-real-size-check-circle { display:block; box-sizing:border-box; flex:none; border:1.5px solid #69D3E5; border-radius:50%; background:transparent; }
-    .atomica-real-size-check-item b { font-size:10px; }
+    .atomica-real-size-ruler {
+      display:block; position:relative; box-sizing:border-box; height:10px; min-width:1px;
+      border-left:2px solid #F7D77B; border-right:2px solid #F7D77B;
+      background:repeating-linear-gradient(90deg, #F7D77B 0 1px, transparent 1px 10px);
+    }
+    .atomica-real-size-ruler-wrap b { color:#F7D77B; font-size:10px; font-weight:700; }
     .atomica-real-size-close {
       flex:0 0 auto; min-height:37px; padding:7px 13px; border:1px solid #8D6370;
       border-radius:8px; background:#542D39; color:#FFF; font-size:12px; font-weight:700; cursor:pointer;
@@ -1927,39 +1894,10 @@ def get_sheet_real_size_viewer_component():
       const slider = root.querySelector('#atomica-real-size-scale');
       const scaleValue = root.querySelector('#atomica-real-size-scale-value');
       const ruler = root.querySelector('#atomica-real-size-ruler');
-      const rulerTicks = root.querySelector('#atomica-real-size-ruler-ticks');
-      const rulerLabels = root.querySelector('.atomica-real-size-ruler-labels');
-      const scaleMinus = root.querySelector('#atomica-real-size-scale-minus');
-      const scalePlus = root.querySelector('#atomica-real-size-scale-plus');
-      const check54 = root.querySelector('#atomica-real-size-check-54');
-      const check70 = root.querySelector('#atomica-real-size-check-70');
       const meta = root.querySelector('#atomica-real-size-meta');
       const storageKey = 'atomica_printlab_real_size_calibration_v1';
-      // A folha é apresentada em CSS px na referência de 96 px/pol.;
-      // a calibração ajusta um único fator linear para todas as dimensões.
       const pxPerMm = 96 / 25.4;
-      const SCALE_MIN = 0.5;
-      const SCALE_MAX = 2.0;
-      const SCALE_STEP = 0.0001; // 0,01% por clique nos controles finos.
       const clamp = (v, lo, hi) => Math.max(lo, Math.min(hi, v));
-
-      function buildRulerTicks() {
-        if (!rulerTicks || rulerTicks.childElementCount) return;
-        const ns = 'http://www.w3.org/2000/svg';
-        for (let mm = 0; mm <= 100; mm += 1) {
-          const tick = document.createElementNS(ns, 'line');
-          const x = mm * 10; // viewBox de 1000 unidades para 100 mm.
-          const isMajor = mm % 10 === 0;
-          const isMid = mm % 5 === 0;
-          tick.setAttribute('x1', String(x));
-          tick.setAttribute('x2', String(x));
-          tick.setAttribute('y1', isMajor ? '2' : (isMid ? '8' : '14'));
-          tick.setAttribute('y2', '22');
-          // Todos os traços usam a mesma espessura vetorial; só o comprimento muda.
-          tick.setAttribute('stroke-width', '1.15');
-          rulerTicks.appendChild(tick);
-        }
-      }
 
       function readSavedScale() {
         try {
@@ -1973,28 +1911,9 @@ def get_sheet_real_size_viewer_component():
         const pageH = Math.max(1, Number(root.dataset.pageHmm) || 297);
         image.style.width = `${pageW * pxPerMm * scale}px`;
         image.style.height = `${pageH * pxPerMm * scale}px`;
-        // Referência vetorial exata de 100 mm, com traços de espessura uniforme.
-        ruler.style.width = `${100 * pxPerMm * scale}px`;
-        if (rulerLabels) rulerLabels.style.width = ruler.style.width;
-        if (check54) {
-          const cut54 = 54 * pxPerMm * scale;
-          check54.style.width = `${cut54}px`;
-          check54.style.height = `${cut54}px`;
-        }
-        if (check70) {
-          const cut70 = 70 * pxPerMm * scale;
-          check70.style.width = `${cut70}px`;
-          check70.style.height = `${cut70}px`;
-        }
-        slider.value = String(scale);
-        scaleValue.textContent = `${(scale * 100).toFixed(2).replace('.', ',')}%`;
+        ruler.style.width = `${50 * pxPerMm * scale}px`;
+        scaleValue.textContent = `${(scale * 100).toFixed(1).replace('.', ',')}%`;
         try { window.localStorage.setItem(storageKey, String(scale)); } catch (_) {}
-      }
-      function stepScale(direction) {
-        const current = clamp(Number(slider.value) || 1, SCALE_MIN, SCALE_MAX);
-        const next = clamp(current + (direction * SCALE_STEP), SCALE_MIN, SCALE_MAX);
-        slider.value = String(next);
-        applyScale();
       }
       function closeViewer() {
         overlay.classList.remove('is-open');
@@ -2003,10 +1922,7 @@ def get_sheet_real_size_viewer_component():
 
       if (root.dataset.initialized !== 'true') {
         slider.value = String(readSavedScale());
-        buildRulerTicks();
         slider.addEventListener('input', applyScale);
-        scaleMinus.addEventListener('click', () => stepScale(-1));
-        scalePlus.addEventListener('click', () => stepScale(1));
         closeButton.addEventListener('click', () => {
           if (document.fullscreenElement) {
             const promise = document.exitFullscreen?.();
@@ -3804,111 +3720,41 @@ def build_button_art_png(
     return buffer.getvalue(), artwork.size
 
 
-def build_template_svg(spec: ButtonSpec) -> bytes:
-    """Gabarito SVG A4 colorido, transparente e dimensionado em milímetros."""
-    page_w, page_h = 210.0, 297.0
-    cx, cy = page_w / 2, 132.0
+def build_template_pdf(spec: ButtonSpec) -> bytes:
+    """Gabarito vetorial em tamanho real com as 4 guias, para uso pelo designer."""
+    pad, legend_h = 8, 30
+    W = spec.cut + 2 * pad
+    H = W + legend_h
+    buf = io.BytesIO()
+    c = canvas.Canvas(buf, pagesize=(W * mm, H * mm))
+    configure_pdf_print_size(c)
     shape_title = "quadrado" if spec.shape == "square" else "redondo"
-    size_title = f"{spec.size:g} x {spec.size:g} mm" if spec.shape == "square" else f"{spec.size:g} mm"
-    guide_elements = []
+    c.setTitle(f"Gabarito botton {shape_title} {spec.size:g} mm")
+    cx, cy = W / 2 * mm, (legend_h + W / 2) * mm
+    draw_guides(c, cx, cy, spec, tuple(g.key for g in GUIDES), line_pt=0.5)
 
-    def dash_attributes(guide: Guide) -> str:
-        if guide.style == "dashed":
-            return ' stroke-dasharray="2.2 1.4"'
-        if guide.style == "dotted":
-            return ' stroke-dasharray="0.1 1.6" stroke-linecap="round"'
-        return ""
-
-    def guide_geometry(guide: Guide, stroke: str, stroke_width: float) -> str:
-        diameter = float(getattr(spec, guide.attr))
-        dash = dash_attributes(guide)
-        if spec.shape == "square":
-            half = diameter / 2
-            x, y = cx - half, cy - half
-            return (
-                f'<rect x="{x:.4f}" y="{y:.4f}" width="{diameter:.4f}" '
-                f'height="{diameter:.4f}" fill="none" stroke="{stroke}" '
-                f'stroke-width="{stroke_width:.3f}"{dash}/>'
-            )
-        return (
-            f'<circle cx="{cx:.4f}" cy="{cy:.4f}" r="{diameter / 2:.4f}" '
-            f'fill="none" stroke="{stroke}" stroke-width="{stroke_width:.3f}"{dash}/>'
-        )
-
-    # Cada guia recebe uma linha escura externa e uma linha colorida interna.
-    # Isso preserva as cores de identificação e mantém a guia amarela legível
-    # quando o SVG é aberto sobre uma página branca. Nenhuma forma de fundo é
-    # desenhada: a prancheta e as áreas externas às guias permanecem transparentes.
-    for guide in GUIDES:
-        guide_elements.append(guide_geometry(guide, "#243447", 0.48))
-        guide_elements.append(guide_geometry(guide, guide.color, 0.22))
-
-    legend_y = 226.0
-    legend_rows = []
-    for guide in GUIDES:
-        diameter = float(getattr(spec, guide.attr))
-        y = legend_y + len(legend_rows) * 10.0
-        dash = dash_attributes(guide)
-        legend_rows.append(
-            f'<line x1="16" y1="{y:.2f}" x2="29" y2="{y:.2f}" '
-            f'stroke="#243447" stroke-width="1.05"{dash}/>'
-            f'<line x1="16" y1="{y:.2f}" x2="29" y2="{y:.2f}" '
-            f'stroke="{guide.color}" stroke-width="0.58"{dash}/>'
-            f'<text x="34" y="{y + 1.2:.2f}" font-family="Arial, sans-serif" '
-            f'font-size="3.4" fill="#222222">{guide.label}: {diameter:g} mm</text>'
-        )
-
-    svg = f"""<?xml version="1.0" encoding="UTF-8"?>
-<svg xmlns="http://www.w3.org/2000/svg" width="210mm" height="297mm" viewBox="0 0 210 297" version="1.1" style="background-color:transparent">
-  <title>Gabarito A4 - Botton {shape_title} {size_title}</title>
-  <desc>Gabarito vetorial colorido em escala real. Prancheta A4 de 210 por 297 mm. Corte em magenta, Dobra em amarelo, Arte em azul e Segurança em verde. Fundo transparente, sem preenchimento de página.</desc>
-  <g id="guias-botton" fill="none" stroke-linejoin="round" stroke-linecap="round">
-    {''.join(guide_elements)}
-  </g>
-  <g id="identificacao" font-family="Arial, sans-serif" fill="#222222">
-    <text x="105" y="18" text-anchor="middle" font-size="5.0" font-weight="700">GABARITO DE BOTTON</text>
-    <text x="105" y="25" text-anchor="middle" font-size="3.5">Formato {shape_title} · {size_title}</text>
-    <text x="16" y="216" font-size="3.6" font-weight="700">DIMENSÕES DAS GUIAS</text>
-    {''.join(legend_rows)}
-    <text x="16" y="278" font-size="2.8" fill="#555555">Documento A4 · 210 × 297 mm · escala real 1:1</text>
-    <text x="16" y="283" font-size="2.8" fill="#555555">Fundo transparente. Importe sem redimensionar para manter as medidas originais.</text>
-  </g>
-</svg>"""
-    return svg.encode("utf-8")
-
-
-def _sync_layout_from_capacity_choice() -> None:
-    """Mapeia a opção funcional de capacidade para o modo de distribuição."""
-    choice = str(st.session_state.get("layout_capacity_choice", ""))
-    if choice.startswith("Grade:"):
-        st.session_state["layout_label"] = "Grade"
-    elif choice.startswith("Hexagonal:"):
-        st.session_state["layout_label"] = "Hexagonal (mais compacta)"
-
-
-def _step_sheet_preview_page(delta: int, total_pages: int) -> None:
-    """Navega a prévia sem alterar a paginação/exportação do PDF."""
-    current = int(st.session_state.get("_sheet_preview_page_selector", 1) or 1)
-    st.session_state["_sheet_preview_page_selector"] = max(1, min(int(total_pages), current + int(delta)))
-
-
-def _get_items_for_sheet_page(runtime_groups, page_number: int, per_page: int):
-    """Retorna somente os itens que ocupam a página indicada, respeitando a ordem do Pool."""
-    start = max(0, (int(page_number) - 1) * int(per_page))
-    end = start + max(0, int(per_page))
-    cursor = 0
-    page_items = []
-    for entry in runtime_groups:
-        qty = max(0, int(entry.get("qty", 0)))
-        overlap_start = max(start, cursor)
-        overlap_end = min(end, cursor + qty)
-        count = max(0, overlap_end - overlap_start)
-        if count:
-            page_items.extend([entry] * count)
-        cursor += qty
-        if cursor >= end:
-            break
-    return page_items
+    c.setFont("Helvetica", 7)
+    for i, g in enumerate(GUIDES):
+        ly = (legend_h - 6 - i * 5.5) * mm
+        c.saveState()
+        if g.key == "cut":
+            c.setStrokeColor(black)
+            c.setDash()
+        else:
+            c.setStrokeColor(HexColor(g.color))
+            if g.style == "dashed":
+                c.setDash(2.2 * mm, 1.4 * mm)
+            elif g.style == "dotted":
+                c.setLineWidth(0.8)
+                c.setLineCap(1)
+                c.setDash(0.01, 1.6 * mm)
+        c.setLineWidth(0.8)
+        c.line(pad * mm, ly + 1 * mm, (pad + 2.5) * mm, ly + 1 * mm)
+        c.restoreState()
+        c.setFillColor(black)
+        c.drawString((pad + 3.5) * mm, ly, f"{g.label}: {getattr(spec, g.attr):g} mm")
+    c.save()
+    return buf.getvalue()
 
 
 # ----------------------------------------------------------------------------
@@ -4331,73 +4177,77 @@ def main():
         )
         spec = BUTTONS[size_key]
         st.markdown(legend_html(spec), unsafe_allow_html=True)
-        st.divider()
-        gabarito_svg = build_template_svg(spec)
-        gabarito_name = (
-            f"gabarito_botton_quadrado_{spec.size:g}x{spec.size:g}mm_A4.svg"
-            if spec.shape == "square"
-            else f"gabarito_botton_redondo_{spec.size:g}mm_A4.svg"
+
+        brand.sidebar_title("FOLHA", brand.MAGENTA)
+        paper = st.selectbox("Papel", [*PAPERS, "Personalizado"], key="paper_size")
+        if paper == "Personalizado":
+            c1, c2 = st.columns(2)
+            pw = c1.number_input("Largura (mm)", 60.0, 1500.0, 210.0, 1.0, key="custom_page_w")
+            ph = c2.number_input("Altura (mm)", 60.0, 1500.0, 297.0, 1.0, key="custom_page_h")
+        else:
+            pw, ph = PAPERS[paper]
+        orient = st.radio("Orientação", ["Retrato", "Paisagem"], horizontal=True, key="page_orientation")
+        page_w, page_h = (min(pw, ph), max(pw, ph)) if orient == "Retrato" else (max(pw, ph), min(pw, ph))
+
+        # Recalcula a sugestão para a orientação atual, mas usa um perfil de
+        # configuração independente da orientação. Assim, trocar Retrato/Paisagem
+        # não sobrescreve margem, espaçamento ou disposição escolhidos pelo usuário.
+        recommended_margin, recommended_gap, recommended_mode = recommend_single_layout(
+            page_w, page_h, spec
         )
-        st.download_button(
-            "📐 Baixar gabarito SVG · A4",
-            data=gabarito_svg,
-            file_name=gabarito_name,
-            mime="image/svg+xml",
+        st.session_state["_recommended_margin"] = recommended_margin
+        st.session_state["_recommended_gap"] = recommended_gap
+        profile_key = layout_settings_profile_key(paper, page_w, page_h, size_key, spec.shape)
+        if st.session_state.get("_layout_profile_key") != profile_key:
+            st.session_state["margin_mm"] = recommended_margin
+            st.session_state["gap_mm"] = recommended_gap
+            st.session_state["layout_label"] = "Hexagonal (mais compacta)" if recommended_mode == "hex" else "Grade"
+            st.session_state["_layout_profile_key"] = profile_key
+
+        margin = st.number_input(
+            "Margem da folha (mm)", 0.0, 50.0, step=0.5, key="margin_mm",
+            help="Valor inicial calculado para o papel e tamanho escolhido. Você pode alterar livremente.",
+        )
+        gap = st.number_input(
+            "Espaço entre bottons (mm)", 0.0, 20.0, step=0.5, key="gap_mm",
+            help="Distância mínima entre os limites externos de corte dos bottons.",
+        )
+        st.caption(f"Sugestão automática: margem {recommended_margin:g} mm · distância {recommended_gap:g} mm.")
+        st.button(
+            "Restaurar valores recomendados",
             use_container_width=True,
-            help="Gabarito vetorial em A4 (210 × 297 mm), com todas as guias nas dimensões reais em milímetros.",
-            key="download_button_template_svg_a4",
+            on_click=restore_recommended_layout,
         )
 
-    # Estado das configurações da folha é lido antes do Pool, pois capacidade e
-    # preenchimento dependem da orientação, margens e disposição. Os widgets são
-    # renderizados mais abaixo, ao lado do canvas, mas seus valores persistem no
-    # session_state entre os reruns.
-    st.session_state.setdefault("paper_size", "A4")
-    st.session_state.setdefault("custom_page_w", 210.0)
-    st.session_state.setdefault("custom_page_h", 297.0)
-    st.session_state.setdefault("page_orientation", "Retrato")
-    st.session_state.setdefault("margin_mm", 5.0)
-    st.session_state.setdefault("gap_mm", 3.0)
-    for guide in GUIDES:
-        st.session_state.setdefault(f"guide_single_{guide.key}", guide.key == "cut")
+        layout_options = ["Grade"] + (["Hexagonal (mais compacta)"] if spec.shape == "circle" else [])
+        if st.session_state.get("layout_label") not in layout_options:
+            st.session_state["layout_label"] = layout_options[0]
+        layout_label = st.radio("Disposição", layout_options, key="layout_label")
+        mode = "grid" if layout_label == "Grade" else "hex"
 
-    paper = st.session_state.get("paper_size", "A4")
-    if paper not in [*PAPERS, "Personalizado"]:
-        paper = "A4"
-        st.session_state["paper_size"] = paper
-    if paper == "Personalizado":
-        pw = float(st.session_state.get("custom_page_w", 210.0))
-        ph = float(st.session_state.get("custom_page_h", 297.0))
-    else:
-        pw, ph = PAPERS[paper]
-    orient = st.session_state.get("page_orientation", "Retrato")
-    if orient not in {"Retrato", "Paisagem"}:
-        orient = "Retrato"
-        st.session_state["page_orientation"] = orient
-    page_w, page_h = (min(pw, ph), max(pw, ph)) if orient == "Retrato" else (max(pw, ph), min(pw, ph))
+        brand.sidebar_title("GUIAS IMPRESSAS", brand.YELLOW)
+        guides = tuple(
+            g.key
+            for g in GUIDES
+            if st.checkbox(
+                f"{g.label} ({getattr(spec, g.attr):g} mm)",
+                value=(g.key == "cut"),
+                key=f"guide_single_{g.key}",
+            )
+        )
 
-    # O perfil não distingue a rotação da folha; assim, mudar Retrato/Paisagem
-    # preserva margem, espaçamento e disposição escolhidos pelo usuário.
-    recommended_margin, recommended_gap, recommended_mode = recommend_single_layout(
-        page_w, page_h, spec
-    )
-    st.session_state["_recommended_margin"] = recommended_margin
-    st.session_state["_recommended_gap"] = recommended_gap
-    profile_key = layout_settings_profile_key(paper, page_w, page_h, size_key, spec.shape)
-    if st.session_state.get("_layout_profile_key") != profile_key:
-        st.session_state["margin_mm"] = recommended_margin
-        st.session_state["gap_mm"] = recommended_gap
-        st.session_state["layout_label"] = "Hexagonal (mais compacta)" if recommended_mode == "hex" else "Grade"
-        st.session_state["_layout_profile_key"] = profile_key
-
-    layout_options = ["Grade"] + (["Hexagonal (mais compacta)"] if spec.shape == "circle" else [])
-    if st.session_state.get("layout_label") not in layout_options:
-        st.session_state["layout_label"] = layout_options[0]
-    margin = float(st.session_state.get("margin_mm", recommended_margin))
-    gap = float(st.session_state.get("gap_mm", recommended_gap))
-    layout_label = st.session_state.get("layout_label", layout_options[0])
-    mode = "grid" if layout_label == "Grade" else "hex"
-    guides = tuple(g.key for g in GUIDES if bool(st.session_state.get(f"guide_single_{g.key}", g.key == "cut")))
+        st.divider()
+        st.download_button(
+            "📐 Baixar gabarito (PDF)",
+            build_template_pdf(spec),
+            file_name=(
+                f"gabarito_botton_quadrado_{spec.size:g}x{spec.size:g}mm.pdf"
+                if spec.shape == "square"
+                else f"gabarito_botton_redondo_{spec.size:g}mm.pdf"
+            ),
+            mime="application/pdf",
+            help="Gabarito em tamanho real com as 4 guias, para o designer posicionar a arte.",
+        )
 
     # ---------------- Pool de artes ----------------
     brand.section_title(None, "ARTES DA IMPRESSÃO", brand.CYAN)
@@ -4501,10 +4351,10 @@ def main():
     art_items = st.session_state["artwork_items"]
     batch_notice = st.session_state.pop("_artwork_batch_notice", None)
     if batch_notice:
-        st.toast(batch_notice, icon="✅")
+        st.success(batch_notice)
     pool_delete_notice = st.session_state.pop("_pool_delete_notice", None)
     if pool_delete_notice:
-        st.toast(pool_delete_notice, icon="✅")
+        st.success(pool_delete_notice)
     if art_items:
         current_pool_ids = {int(item["id"]) for item in art_items}
         st.session_state["artwork_batch_selected_ids"] = [
@@ -4578,20 +4428,7 @@ def main():
         pool_order = [str(item["id"]) for item in art_items]
         pool_quantities = {str(item["id"]): max(1, int(item.get("qty", 1))) for item in art_items}
         pool_selected = str(st.session_state["artwork_selected_id"])
-        st.markdown(
-            """
-            <div style="background:rgba(24,54,79,.34);border:1px solid rgba(110,151,182,.28);border-radius:10px;padding:10px 12px;margin:0 0 12px;color:#D9E5EF;">
-              <div style="font-size:10px;font-weight:800;letter-spacing:.09em;color:#8FC9D8;margin-bottom:8px;">COMO USAR O POOL</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:9px 16px;">
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Editar</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Clique na miniatura para abrir a arte no editor.</div></div>
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Selecionar e excluir</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Marque as caixas para selecionar artes. O botão ao lado exclui a seleção ou, sem seleção, todo o Pool.</div></div>
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Aplicar ajustes em lote</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Use a caixa em Ajustes Gerais da Arte. Zoom e posição manuais continuam individuais.</div></div>
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Quantidade e ordem</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Digite a quantidade ou use +/−. Arraste as miniaturas para ordenar a impressão.</div></div>
-              </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        st.caption("Clique na miniatura para editá-la. Use as caixas nas miniaturas para selecionar artes. A aplicação em lote fica dentro de AJUSTES GERAIS DA ARTE; ao lado da seleção há o comando contextual para excluir a seleção ou todas as artes. A posição e o zoom manuais continuam individuais. Digite a quantidade ou use +/−; arraste para ordenar a impressão.")
 
         try:
             pool_component = get_artwork_pool_component()
@@ -4933,6 +4770,9 @@ def main():
                 if fit_mode == "cut":
                     box = image_box(selected_dimensions[0], selected_dimensions[1], spec.cut, zoom, off_x, off_y)
                     dpi = min(selected_dimensions) / ((spec.cut * zoom) / 25.4)
+                    if not covers_shape(box, spec.cut):
+                        fill_text = "o fundo desfocado" if background_mode == "blur" else "a cor sólida escolhida"
+                        st.info(f"As áreas do corte não ocupadas pela arte principal serão preenchidas por {fill_text}.")
                 else:
                     dpi = max(selected_dimensions) / ((spec.art * zoom) / 25.4)
                 if dpi < 200:
@@ -4946,7 +4786,7 @@ def main():
             # pixels durante cada arraste, clique ou atualização da prévia.
             if selected_item is not None and selected_dimensions is not None:
                 st.divider()
-                brand.section_title(None, "EXPORTAR ARTE EM FOCO", brand.YELLOW)
+                brand.section_title(None, "Exportar arte em foco", brand.YELLOW)
                 export_cols = st.columns([1, 2])
                 with export_cols[0]:
                     dpi_label = st.selectbox(
@@ -5016,286 +4856,194 @@ def main():
     # ---------------- Folha de impressão e exportação ----------------
     with st.container(key="card_right"):
         brand.section_title(None, "FOLHA DE IMPRESSÃO", brand.MAGENTA)
-        sheet_settings_col, sheet_canvas_col = st.columns([1.02, 3.18], gap="large")
+        positions = compute_layout(page_w, page_h, spec.cut, margin, gap, mode)
+        per_page = len(positions)
+        if per_page == 0:
+            st.error("Os bottons não cabem na folha com essas margens.")
+        else:
+            grid_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "grid"))
+            hex_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "hex")) if spec.shape == "circle" else 0
+            metrics = st.columns(3)
+            metrics[0].metric("Bottons por folha", per_page)
+            metrics[1].metric("Folha", f"{page_w:g} × {page_h:g} mm")
+            metrics[2].metric("Artes diferentes", len(st.session_state["artwork_items"]))
+            if spec.shape == "circle":
+                st.caption(f"Grade: {grid_n} por folha · Hexagonal: {hex_n} por folha")
 
-        # Controles físicos da folha ficam ao lado da prévia, dentro da mesma
-        # sessão visual. O gabarito SVG A4 foi movido para a barra lateral.
-        with sheet_settings_col:
-            with st.container(border=True, key="sheet_settings_panel"):
-                st.markdown('<div class="sheet-config-title">CONFIGURAÇÃO DA FOLHA</div>', unsafe_allow_html=True)
-                st.caption("Ajuste a folha e acompanhe a prévia ao lado.")
-                paper = st.selectbox("Papel", [*PAPERS, "Personalizado"], key="paper_size")
-                if paper == "Personalizado":
-                    custom_cols = st.columns(2)
-                    custom_cols[0].number_input(
-                        "Largura (mm)", 60.0, 1500.0, step=1.0, key="custom_page_w"
+            runtime_groups = []
+            for entry in st.session_state["artwork_items"]:
+                entry_prefix = ensure_artwork_edit_state(entry, spec, sync_session=False)
+                edit = entry.get("edit", {})
+                item_bg = str(edit.get("background", "#FFFFFF"))
+                item_background_label = str(edit.get("background_mode", "Cor sólida"))
+                item_background_mode = "blur" if item_background_label == "Imagem desfocada" else "color"
+                runtime_groups.append({
+                    "id": entry["id"],
+                    "qty": int(entry.get("qty", 1)),
+                    "spec": spec,
+                    "image_digest": entry["image_digest"],
+                    "image_bytes": entry["image"],
+                    "zoom": float(edit.get("zoom", 1.0)),
+                    "off_x": float(edit.get("offset_x", 0.0)),
+                    "off_y": float(edit.get("offset_y", 0.0)),
+                    "fit_mode": str(edit.get("fit_basis_mode", "cut")),
+                    "background_mode": item_background_mode,
+                    "blur_mm": float(edit.get("blur_strength", 0.5)),
+                    "bg": item_bg,
+                })
+
+            total_qty = sum(entry["qty"] for entry in runtime_groups)
+            if runtime_groups:
+                n_pages = math.ceil(total_qty / per_page)
+                st.write(f"**{total_qty}** bottons em **{n_pages}** página(s), seguindo a ordem das miniaturas no pool.")
+                first_page_items = []
+                slots_left = per_page
+                for entry in runtime_groups:
+                    copies = min(int(entry["qty"]), slots_left)
+                    if copies > 0:
+                        first_page_items.extend([entry] * copies)
+                        slots_left -= copies
+                    if slots_left <= 0:
+                        break
+                preview_placements = [
+                    (index, position[0], position[1])
+                    for index, position in enumerate(positions[:len(first_page_items)])
+                ]
+                preview_payload = tuple(
+                    (
+                        entry["image_digest"], entry["image_bytes"],
+                        entry["zoom"], entry["off_x"], entry["off_y"],
+                        entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
                     )
-                    custom_cols[1].number_input(
-                        "Altura (mm)", 60.0, 1500.0, step=1.0, key="custom_page_h"
+                    for entry in first_page_items
+                )
+                preview_placements_tuple = tuple(
+                    (index, position[0], position[1])
+                    for index, position in enumerate(positions[:len(first_page_items)])
+                )
+                sheet_preview_image = render_mixed_sheet_preview_cached(
+                    preview_payload, preview_placements_tuple, spec,
+                    page_w, page_h, bg, tuple(guides),
+                )
+                # Recupera a apresentação anterior: canvas centralizado com 760 px
+                # de largura em ambas as orientações. A imagem-base continua usando
+                # escala interna segura para Retrato/Paisagem; somente a apresentação
+                # visual volta ao tamanho que ocupava melhor a área de trabalho.
+                _, sheet_preview_center, _ = st.columns([1, 8, 1], gap="small")
+                with sheet_preview_center:
+                    st.image(
+                        sheet_preview_image,
+                        caption="Página 1 · artes repetidas conforme os contadores e a ordem das miniaturas",
+                        width=SHEET_PREVIEW_WIDTH_PX,
                     )
-                st.radio(
-                    "Orientação", ["Retrato", "Paisagem"], horizontal=True,
-                    key="page_orientation",
+
+                item_signature = tuple(
+                    (
+                        entry["id"], entry["image_digest"], entry["qty"],
+                        entry["zoom"], entry["off_x"], entry["off_y"],
+                        entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
+                    )
+                    for entry in runtime_groups
                 )
-                st.number_input(
-                    "Margem da folha (mm)", 0.0, 50.0, step=0.5, key="margin_mm",
-                    help="Valor inicial calculado para o papel e tamanho escolhido. Você pode alterar livremente.",
+                sig = (
+                    "art_batch", item_signature, size_key, page_w, page_h,
+                    margin, gap, mode, guides,
                 )
-                st.number_input(
-                    "Espaço entre bottons (mm)", 0.0, 20.0, step=0.5, key="gap_mm",
-                    help="Distância mínima entre os limites externos de corte dos bottons.",
-                )
+
+                # Prévia independente em 96 CSS px/pol. A imagem só é exibida
+                # em tela cheia, com calibração por régua para compensar DPI/zoom
+                # diferentes entre monitores. O cache guarda somente a versão atual.
+                real_size_signature = hashlib.sha256(
+                    repr((sig, "real-size-viewer-v1", page_w, page_h)).encode("utf-8")
+                ).hexdigest()
+                real_size_cache = st.session_state.get("_sheet_real_size_preview_cache")
+                if not real_size_cache or real_size_cache.get("signature") != real_size_signature:
+                    real_size_ppm = min(96.0 / 25.4, 3200.0 / max(float(page_w), float(page_h), 1.0))
+                    real_size_image = render_mixed_sheet_preview_cached(
+                        preview_payload, preview_placements_tuple, spec,
+                        page_w, page_h, bg, tuple(guides),
+                        preview_ppm=real_size_ppm,
+                    )
+                    real_size_buffer = io.BytesIO()
+                    real_size_image.save(real_size_buffer, format="WEBP", quality=92, method=1)
+                    real_size_data_url = (
+                        "data:image/webp;base64,"
+                        + base64.b64encode(real_size_buffer.getvalue()).decode("ascii")
+                    )
+                    st.session_state["_sheet_real_size_preview_cache"] = {
+                        "signature": real_size_signature,
+                        "image_data_url": real_size_data_url,
+                    }
+                    real_size_cache = st.session_state["_sheet_real_size_preview_cache"]
+
+                _, real_size_center, _ = st.columns([1, 8, 1], gap="small")
+                with real_size_center:
+                    real_size_viewer = get_sheet_real_size_viewer_component()
+                    real_size_viewer(
+                        data={
+                            "signature": real_size_cache["signature"],
+                            "image_data_url": real_size_cache["image_data_url"],
+                            "page_w_mm": float(page_w),
+                            "page_h_mm": float(page_h),
+                            "page_label": str(paper),
+                            "button_size_mm": float(spec.size),
+                            "cut_mm": float(spec.cut),
+                        },
+                        key="sheet_real_size_viewer",
+                        width="stretch",
+                    )
+                    st.caption(
+                        "A visualização em tamanho real usa a referência de 96 px/pol. "
+                        "Na tela cheia, calibre a linha de 50 mm com uma régua física. "
+                        "A calibração fica salva neste navegador e pode ser refeita ao trocar de monitor ou zoom."
+                    )
+
+                shape_name = "quadrado" if spec.shape == "square" else "redondo"
+                size_name = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
+                fname = f"bottons_{shape_name}_{size_name}_{total_qty}un.pdf"
+
+                if st.button("Gerar PDF", type="primary", disabled=(total_qty <= 0), key="generate_art_batch_pdf"):
+                    with st.spinner("Gerando PDF com todas as artes do lote…"):
+                        pdf_items = []
+                        for entry in runtime_groups:
+                            pdf_entry = dict(entry)
+                            pdf_entry["img"] = load_image(
+                                entry["image_bytes"], image_digest=entry["image_digest"]
+                            )
+                            pdf_items.append(pdf_entry)
+                        pdf = build_art_batch_pdf(
+                            pdf_items, positions, page_w, page_h, total_qty,
+                            bg=bg, guides=guides,
+                        )
+                    pdf_base64 = base64.b64encode(pdf).decode("ascii")
+                    st.session_state["pdf"] = {
+                        "sig": sig, "bytes": pdf, "base64": pdf_base64, "name": fname
+                    }
+
+                stored = st.session_state.get("pdf")
+                if stored and stored["sig"] == sig:
+                    st.download_button(
+                        f"⬇️ Baixar PDF ({len(stored['bytes']) / 1e6:.1f} MB)",
+                        stored["bytes"], file_name=stored["name"], mime="application/pdf", type="primary",
+                        key="download_art_batch_pdf",
+                    )
+                    pdf_print = get_pdf_print_component()
+                    pdf_print(
+                        data={
+                            "pdf_base64": stored.get("base64") or base64.b64encode(stored["bytes"]).decode("ascii"),
+                            "signature": hashlib.sha256(repr(stored["sig"]).encode("utf-8")).hexdigest(),
+                        },
+                        key="pdf_print_direct",
+                        width="stretch",
+                    )
+                elif stored:
+                    st.info("As artes, quantidades ou configurações mudaram desde o último PDF — gere o arquivo novamente.")
                 st.caption(
-                    f"Sugestão automática: margem {recommended_margin:g} mm · "
-                    f"distância {recommended_gap:g} mm."
+                    "O botão Imprimir PDF solicita diretamente o diálogo de impressão do navegador, sem abrir prévia ou nova aba. "
+                    "Para manter a escala física 1:1, escolha Tamanho real/100% e desative Ajustar à página."
                 )
-                st.button(
-                    "Restaurar valores recomendados",
-                    use_container_width=True,
-                    on_click=restore_recommended_layout,
-                )
-                with st.expander("Guias impressas", expanded=False):
-                    for guide in GUIDES:
-                        st.checkbox(
-                            f"{guide.label} ({getattr(spec, guide.attr):g} mm)",
-                            key=f"guide_single_{guide.key}",
-                        )
-
-        with sheet_canvas_col:
-            with st.container(border=True, key="sheet_canvas_panel"):
-                brand.section_title(None, "PRÉVIA DA FOLHA", brand.MAGENTA)
-                positions = compute_layout(page_w, page_h, spec.cut, margin, gap, mode)
-                per_page = len(positions)
-                if per_page == 0:
-                    st.error("Os bottons não cabem na folha com essas margens.")
-                else:
-                    grid_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "grid"))
-                    hex_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "hex")) if spec.shape == "circle" else 0
-
-                    # A capacidade substitui o seletor antigo de disposição:
-                    # os próprios rótulos passam a ser as opções funcionais.
-                    grid_choice = f"Grade: {grid_n} por folha"
-                    hex_choice = f"Hexagonal: {hex_n} por folha"
-                    current_layout_label = str(st.session_state.get("layout_label", "Grade"))
-                    selected_capacity_choice = (
-                        hex_choice if current_layout_label.startswith("Hexagonal") else grid_choice
-                    )
-                    capacity_options = [grid_choice, hex_choice] if spec.shape == "circle" else [grid_choice]
-                    if st.session_state.get("layout_capacity_choice") != selected_capacity_choice:
-                        st.session_state["layout_capacity_choice"] = selected_capacity_choice
-                    if spec.shape == "circle":
-                        st.radio(
-                            "Capacidade por disposição",
-                            capacity_options,
-                            horizontal=True,
-                            key="layout_capacity_choice",
-                            on_change=_sync_layout_from_capacity_choice,
-                            label_visibility="collapsed",
-                        )
-                    else:
-                        st.caption(grid_choice)
-
-                    metrics = st.columns(3)
-                    metrics[0].metric("Bottons por folha", per_page)
-                    metrics[1].metric("Folha", f"{page_w:g} × {page_h:g} mm")
-                    metrics[2].metric("Artes diferentes", len(st.session_state["artwork_items"]))
-
-                    runtime_groups = []
-                    for entry in st.session_state["artwork_items"]:
-                        ensure_artwork_edit_state(entry, spec, sync_session=False)
-                        edit = entry.get("edit", {})
-                        item_bg = str(edit.get("background", "#FFFFFF"))
-                        item_background_label = str(edit.get("background_mode", "Cor sólida"))
-                        item_background_mode = "blur" if item_background_label == "Imagem desfocada" else "color"
-                        runtime_groups.append({
-                            "id": entry["id"],
-                            "qty": int(entry.get("qty", 1)),
-                            "spec": spec,
-                            "image_digest": entry["image_digest"],
-                            "image_bytes": entry["image"],
-                            "zoom": float(edit.get("zoom", 1.0)),
-                            "off_x": float(edit.get("offset_x", 0.0)),
-                            "off_y": float(edit.get("offset_y", 0.0)),
-                            "fit_mode": str(edit.get("fit_basis_mode", "cut")),
-                            "background_mode": item_background_mode,
-                            "blur_mm": float(edit.get("blur_strength", 0.5)),
-                            "bg": item_bg,
-                        })
-
-                    total_qty = sum(entry["qty"] for entry in runtime_groups)
-                    if runtime_groups:
-                        n_pages = math.ceil(total_qty / per_page)
-                        page_key = "_sheet_preview_page_selector"
-                        current_page = int(st.session_state.get(page_key, 1) or 1)
-                        current_page = max(1, min(n_pages, current_page))
-                        st.session_state[page_key] = current_page
-
-                        if n_pages > 1:
-                            page_nav = st.columns([1.1, 1.6, 1.1], gap="small")
-                            with page_nav[0]:
-                                st.button(
-                                    "← Página anterior",
-                                    key="sheet_preview_page_previous",
-                                    use_container_width=True,
-                                    disabled=current_page <= 1,
-                                    on_click=_step_sheet_preview_page,
-                                    args=(-1, n_pages),
-                                )
-                            with page_nav[1]:
-                                st.selectbox(
-                                    "Página da prévia",
-                                    options=list(range(1, n_pages + 1)),
-                                    format_func=lambda value: f"Página {value} de {n_pages}",
-                                    key=page_key,
-                                    label_visibility="collapsed",
-                                )
-                            with page_nav[2]:
-                                st.button(
-                                    "Próxima página →",
-                                    key="sheet_preview_page_next",
-                                    use_container_width=True,
-                                    disabled=current_page >= n_pages,
-                                    on_click=_step_sheet_preview_page,
-                                    args=(1, n_pages),
-                                )
-                        else:
-                            st.caption("Página 1 de 1")
-
-                        current_page = int(st.session_state.get(page_key, 1) or 1)
-                        current_page_items = _get_items_for_sheet_page(runtime_groups, current_page, per_page)
-                        preview_placements_tuple = tuple(
-                            (index, position[0], position[1])
-                            for index, position in enumerate(positions[:len(current_page_items)])
-                        )
-                        preview_payload = tuple(
-                            (
-                                entry["image_digest"], entry["image_bytes"],
-                                entry["zoom"], entry["off_x"], entry["off_y"],
-                                entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
-                            )
-                            for entry in current_page_items
-                        )
-                        sheet_preview_image = render_mixed_sheet_preview_cached(
-                            preview_payload, preview_placements_tuple, spec,
-                            page_w, page_h, bg, tuple(guides),
-                        )
-                        st.image(
-                            sheet_preview_image,
-                            caption=(
-                                f"Página {current_page} de {n_pages} · artes repetidas conforme as quantidades "
-                                "e a ordem das miniaturas do Pool"
-                            ),
-                            width=SHEET_PREVIEW_WIDTH_PX,
-                        )
-
-                        item_signature = tuple(
-                            (
-                                entry["id"], entry["image_digest"], entry["qty"],
-                                entry["zoom"], entry["off_x"], entry["off_y"],
-                                entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
-                            )
-                            for entry in runtime_groups
-                        )
-                        sig = (
-                            "art_batch", item_signature, size_key, page_w, page_h,
-                            margin, gap, mode, guides,
-                        )
-
-                        # A visualização em tamanho real acompanha a página selecionada.
-                        real_size_signature = hashlib.sha256(
-                            repr((sig, "real-size-viewer-v2", page_w, page_h, current_page)).encode("utf-8")
-                        ).hexdigest()
-                        real_size_cache = st.session_state.get("_sheet_real_size_preview_cache")
-                        if not real_size_cache or real_size_cache.get("signature") != real_size_signature:
-                            # Renderizar a origem em 150 dpi e exibi-la em 96 CSS px/pol.
-                            # A resolução extra reduz a quantização das bordas circulares,
-                            # sem alterar a dimensão física mostrada no monitor.
-                            real_size_ppm = min(150.0 / 25.4, 5000.0 / max(float(page_w), float(page_h), 1.0))
-                            real_size_image = render_mixed_sheet_preview_cached(
-                                preview_payload, preview_placements_tuple, spec,
-                                page_w, page_h, bg, tuple(guides),
-                                preview_ppm=real_size_ppm,
-                            )
-                            real_size_buffer = io.BytesIO()
-                            real_size_image.save(real_size_buffer, format="WEBP", quality=92, method=1)
-                            real_size_data_url = (
-                                "data:image/webp;base64,"
-                                + base64.b64encode(real_size_buffer.getvalue()).decode("ascii")
-                            )
-                            st.session_state["_sheet_real_size_preview_cache"] = {
-                                "signature": real_size_signature,
-                                "image_data_url": real_size_data_url,
-                            }
-                            real_size_cache = st.session_state["_sheet_real_size_preview_cache"]
-
-                        real_size_viewer = get_sheet_real_size_viewer_component()
-                        real_size_viewer(
-                            data={
-                                "signature": real_size_cache["signature"],
-                                "image_data_url": real_size_cache["image_data_url"],
-                                "page_w_mm": float(page_w),
-                                "page_h_mm": float(page_h),
-                                "page_label": f"{paper} · página {current_page}/{n_pages}",
-                                "button_size_mm": float(spec.size),
-                                "cut_mm": float(spec.cut),
-                            },
-                            key="sheet_real_size_viewer",
-                            width="stretch",
-                        )
-                        st.caption(
-                            "A visualização em tamanho real usa a referência de 96 px/pol. "
-                            "Na tela cheia, calibre a régua de 100 mm com uma régua física. Use os botões + e − para correções finas. "
-                            "A calibração fica salva neste navegador e pode ser refeita ao trocar de monitor ou zoom."
-                        )
-
-                        shape_name = "quadrado" if spec.shape == "square" else "redondo"
-                        size_name = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
-                        fname = f"bottons_{shape_name}_{size_name}_{total_qty}un.pdf"
-
-                        if st.button("Gerar PDF", type="primary", disabled=(total_qty <= 0), key="generate_art_batch_pdf"):
-                            with st.spinner("Gerando PDF com todas as artes do lote…"):
-                                pdf_items = []
-                                for entry in runtime_groups:
-                                    pdf_entry = dict(entry)
-                                    pdf_entry["img"] = load_image(
-                                        entry["image_bytes"], image_digest=entry["image_digest"]
-                                    )
-                                    pdf_items.append(pdf_entry)
-                                pdf = build_art_batch_pdf(
-                                    pdf_items, positions, page_w, page_h, total_qty,
-                                    bg=bg, guides=guides,
-                                )
-                            pdf_base64 = base64.b64encode(pdf).decode("ascii")
-                            st.session_state["pdf"] = {
-                                "sig": sig, "bytes": pdf, "base64": pdf_base64, "name": fname
-                            }
-
-                        stored = st.session_state.get("pdf")
-                        if stored and stored["sig"] == sig:
-                            st.download_button(
-                                f"⬇️ Baixar PDF ({len(stored['bytes']) / 1e6:.1f} MB)",
-                                stored["bytes"], file_name=stored["name"], mime="application/pdf", type="primary",
-                                key="download_art_batch_pdf",
-                            )
-                            pdf_print = get_pdf_print_component()
-                            pdf_print(
-                                data={
-                                    "pdf_base64": stored.get("base64") or base64.b64encode(stored["bytes"]).decode("ascii"),
-                                    "signature": hashlib.sha256(repr(stored["sig"]).encode("utf-8")).hexdigest(),
-                                },
-                                key="pdf_print_direct",
-                                width="stretch",
-                            )
-                            with st.container(border=True):
-                                st.markdown("**Impressão em escala real**")
-                                st.caption(
-                                    "O botão Imprimir PDF solicita diretamente o diálogo de impressão do navegador, sem abrir prévia ou nova aba. "
-                                    "Para manter a escala física 1:1, escolha Tamanho real/100% e desative Ajustar à página."
-                                )
-                        elif stored:
-                            st.info("As artes, quantidades ou configurações mudaram desde o último PDF — gere o arquivo novamente.")
-                    else:
-                        st.info("Adicione as artes para montar a folha de impressão.")
+            else:
+                st.info("Adicione as artes para montar a folha de impressão.")
 
     brand.render_footer()
 
