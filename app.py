@@ -4505,7 +4505,7 @@ def main():
             )
 
         st.number_input(
-            "Diâmetro da guia magenta · Corte (mm)",
+            "Diâmetro da Guia de Corte (mm)",
             min_value=float(base_spec.fold),
             max_value=float(base_spec.cut) + 5.0,
             step=0.5,
