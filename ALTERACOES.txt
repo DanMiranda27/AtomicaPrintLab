@@ -6,7 +6,7 @@ ATUALIZACAO - CALIBRACAO FISICA E AVISOS TEMPORARIOS
 ---------------------------------------------------
 - As referencias circulares da visualizacao em tamanho real representam agora
   os diametros externos de CORTE: 54 mm para o botton nominal de 44 mm e
-  68 mm para o botton nominal de 58 mm.
+  70 mm para o botton nominal de 58 mm.
 - A calibracao ganhou botoes de incremento e decremento fino de 0,01%, mantendo
   o controle deslizante como ajuste amplo e a mesma escala linear para todos
   os diametros.
@@ -579,3 +579,27 @@ VALIDACAO DO GABARITO SVG
 - Compilação Python e sintaxe dos cinco módulos JavaScript aprovadas.
 - A interface Streamlit completa não foi executada neste ambiente; conferir a
   aparência visual final e a importação em seu editor vetorial localmente.
+
+
+ATUALIZACAO - MEDIDA DO CORTE E ORIENTACOES DO POOL
+---------------------------------------------------
+- O diâmetro externo de corte do botton nominal de 58 mm foi corrigido de
+  68 mm para 70 mm na tabela de especificações do aplicativo. A correção
+  repercute no editor, na adaptação pelas guias, no cálculo de encaixe da folha,
+  no PDF e no gabarito SVG, todos derivados da mesma especificação.
+- A referência física do visualizador em tamanho real agora compara 54 mm
+  (corte do botton nominal de 44 mm) e 70 mm (corte do botton nominal de 58 mm).
+- A mensagem redundante abaixo do canvas individual foi removida; as informações
+  sobre fundo e preenchimento permanecem visíveis nos próprios controles.
+- As instruções do Pool foram reorganizadas em quatro blocos compactos: editar,
+  selecionar/excluir, aplicar ajustes em lote e definir quantidade/ordem.
+
+COMPLEMENTO CONSERVADOR - ENVIO PELO SMARTPHONE VIA QR CODE
+----------------------------------------------------------
+- Esta variante parte integralmente do pacote estável v3.16 anexado pelo usuário.
+- Única funcionalidade nova: envio temporário de imagens do smartphone por QR Code
+  na mesma rede Wi-Fi, com entrada direta no Pool de Artes existente.
+- Não inclui o arredondamento de cantos nem alterações na geometria, editor,
+  transformação entre tamanhos, guias, visualizador físico, prévia, PNG ou PDF.
+- O servidor local usa token temporário, aceita PNG/JPG/JPEG/WEBP e encerra a
+  sessão quando o usuário invalida o QR Code.

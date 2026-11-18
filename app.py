@@ -76,7 +76,7 @@ BUTTONS: dict[str, ButtonSpec] = dict(sorted({
     "50 × 50 mm (quadrado)": ButtonSpec(
         size=50, cut=61, fold=58, art=50, safe=47, shape="square"
     ),
-    "58 mm": ButtonSpec(size=58, cut=68, fold=64, art=58, safe=54),
+    "58 mm": ButtonSpec(size=58, cut=70, fold=64, art=58, safe=54),
     "65 mm": ButtonSpec(size=65, cut=75, fold=71, art=65, safe=61),
     "88 mm": ButtonSpec(size=88, cut=98, fold=94, art=88, safe=84),
 }.items(), key=lambda item: item[1].size))
@@ -1831,11 +1831,11 @@ def get_sheet_real_size_viewer_component():
                   <b>54 mm · corte do botton 44 mm</b>
                 </div>
                 <div class="atomica-real-size-check-item">
-                  <span class="atomica-real-size-check-circle" id="atomica-real-size-check-68"></span>
-                  <b>68 mm · corte do botton 58 mm</b>
+                  <span class="atomica-real-size-check-circle" id="atomica-real-size-check-70"></span>
+                  <b>70 mm · corte do botton 58 mm</b>
                 </div>
               </div>
-              <small>Os círculos representam o diâmetro externo de CORTE (54 e 68 mm), não a face nominal da arte. Ambos devem coincidir com os respectivos gabaritos físicos usando a mesma calibração.</small>
+              <small>Os círculos representam o diâmetro externo de CORTE (54 e 70 mm), não a face nominal da arte. Ambos devem coincidir com os respectivos gabaritos físicos usando a mesma calibração.</small>
             </details>
           </div>
           <button type="button" class="atomica-real-size-close" id="atomica-real-size-close">Fechar ×</button>
@@ -1932,7 +1932,7 @@ def get_sheet_real_size_viewer_component():
       const scaleMinus = root.querySelector('#atomica-real-size-scale-minus');
       const scalePlus = root.querySelector('#atomica-real-size-scale-plus');
       const check54 = root.querySelector('#atomica-real-size-check-54');
-      const check68 = root.querySelector('#atomica-real-size-check-68');
+      const check70 = root.querySelector('#atomica-real-size-check-70');
       const meta = root.querySelector('#atomica-real-size-meta');
       const storageKey = 'atomica_printlab_real_size_calibration_v1';
       // A folha é apresentada em CSS px na referência de 96 px/pol.;
@@ -1981,10 +1981,10 @@ def get_sheet_real_size_viewer_component():
           check54.style.width = `${cut54}px`;
           check54.style.height = `${cut54}px`;
         }
-        if (check68) {
-          const cut68 = 68 * pxPerMm * scale;
-          check68.style.width = `${cut68}px`;
-          check68.style.height = `${cut68}px`;
+        if (check70) {
+          const cut70 = 70 * pxPerMm * scale;
+          check70.style.width = `${cut70}px`;
+          check70.style.height = `${cut70}px`;
         }
         slider.value = String(scale);
         scaleValue.textContent = `${(scale * 100).toFixed(2).replace('.', ',')}%`;
@@ -4297,6 +4297,140 @@ def persist_artwork_edit_state(item: dict, prefix: str) -> None:
         _safety_relative_transform(saved, reference_profile)
 
 
+def _new_artwork_pool_entry(item_id: int, file_name: str, image_bytes: bytes, digest: str, thumb_url: str, spec: ButtonSpec) -> dict:
+    """Cria o mesmo registro de Pool usado pelo upload tradicional."""
+    return {
+        "id": int(item_id),
+        "name": str(file_name),
+        "image": image_bytes,
+        "image_digest": digest,
+        "thumbnail_data_url": thumb_url,
+        "qty": 1,
+        "edit": {
+            "zoom": 1.0,
+            "initial_safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
+            "offset_x": 0.0,
+            "offset_y": 0.0,
+            "transform_revision": 0,
+            "event_seq": 0,
+            "fit_basis_mode": "cut",
+            "fit_cut_checked": True,
+            "fit_art_checked": False,
+            "manual_transform_active": False,
+            "scale_reference_spec": _button_scale_profile(spec),
+            "scale_reference_diameter": float(spec.safe),
+            "safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
+            "safety_relative_offset_x": 0.0,
+            "safety_relative_offset_y": 0.0,
+            "safety_transform_schema": 1,
+            "initial_cut_fit_schema": 4,
+            "background_mode": "Cor sólida",
+            "blur_strength": 0.5,
+            "background": "#FFFFFF",
+        },
+    }
+
+
+@st.fragment(run_every="2s")
+def _mobile_upload_inbox_monitor(spec: ButtonSpec):
+    """Recebe arquivos do pequeno servidor local e acrescenta-os ao Pool existente."""
+    state = st.session_state.get("_mobile_upload_session")
+    if not isinstance(state, dict) or not state.get("token"):
+        return
+    try:
+        from mobile_upload import take_uploaded_files, upload_session_is_active
+        if not upload_session_is_active(str(state["token"])):
+            st.warning("Este QR Code expirou por inatividade. Gere um novo código para continuar enviando imagens.")
+            return
+        received = take_uploaded_files(str(state["token"]))
+    except Exception as exc:
+        st.error(f"Não foi possível consultar os envios do smartphone: {exc}")
+        return
+    if not received:
+        st.caption("Aguardando imagens enviadas pelo smartphone… Esta área verifica novos arquivos automaticamente.")
+        return
+
+    items = st.session_state.setdefault("artwork_items", [])
+    existing_ids = {int(item.get("id", 0)) for item in items}
+    next_id = max(int(st.session_state.get("artwork_next_id", 1)), max(existing_ids, default=0) + 1)
+    added = []
+    failures = []
+    for file_name, image_bytes in received:
+        try:
+            digest, thumb_url = prepare_uploaded_artwork(file_name, image_bytes)
+            record = _new_artwork_pool_entry(next_id, file_name, image_bytes, digest, thumb_url, spec)
+            items.append(record)
+            added.append(next_id)
+            next_id += 1
+        except Exception as exc:
+            failures.append((file_name, str(exc)))
+
+    st.session_state["artwork_next_id"] = next_id
+    if added:
+        if st.session_state.get("artwork_selected_id") is None:
+            st.session_state["artwork_selected_id"] = added[0]
+        st.session_state["artwork_upload_revision"] = int(st.session_state.get("artwork_upload_revision", 0)) + 1
+        st.success(f"{len(added)} imagem(ns) recebida(s) e adicionada(s) ao Pool de Artes.")
+    if failures:
+        st.warning("Alguns arquivos foram ignorados por não serem imagens válidas: " + ", ".join(name for name, _ in failures))
+    if added:
+        st.rerun(scope="app")
+
+
+def _render_mobile_upload_panel(spec: ButtonSpec):
+    """Painel QR de transferência local, sem serviço externo ou conta adicional."""
+    with st.expander("📱 Enviar imagens pelo smartphone · QR Code", expanded=False):
+        st.caption(
+            "Gere um QR Code temporário, leia com a câmera do celular e envie várias imagens diretamente para o Pool. "
+            "O computador e o smartphone precisam estar conectados à mesma rede Wi‑Fi."
+        )
+        session = st.session_state.get("_mobile_upload_session")
+        if st.button("GERAR QR CODE PARA ENVIAR IMAGENS", key="mobile_upload_create_session", type="primary", use_container_width=True):
+            try:
+                from mobile_upload import (
+                    close_upload_session, create_upload_session, get_lan_ip,
+                    get_mobile_upload_port, make_qr_code_png,
+                )
+                if isinstance(session, dict) and session.get("token"):
+                    close_upload_session(str(session["token"]))
+                host = get_lan_ip()
+                if not host:
+                    raise RuntimeError("Não foi possível identificar o endereço IPv4 da rede local deste computador.")
+                port = get_mobile_upload_port()
+                token = create_upload_session()
+                url = f"http://{host}:{port}/upload/{token}"
+                st.session_state["_mobile_upload_session"] = {
+                    "token": token, "url": url, "qr_png": make_qr_code_png(url),
+                    "host": host, "port": port,
+                }
+                st.rerun()
+            except Exception as exc:
+                st.error(f"Não foi possível gerar o QR Code: {exc}")
+
+        session = st.session_state.get("_mobile_upload_session")
+        if isinstance(session, dict) and session.get("token"):
+            qr_col, info_col = st.columns([1, 1.55], gap="medium")
+            with qr_col:
+                st.image(session["qr_png"], caption="Leia este código com a câmera do smartphone", width=210)
+            with info_col:
+                st.markdown("**1. Leia o QR Code**")
+                st.markdown("**2. Escolha fotos ou abra a câmera**")
+                st.markdown("**3. Toque em Enviar imagens**")
+                st.code(session["url"], language=None)
+                st.caption("Válido por 30 minutos sem atividade. Limite de 50 imagens e 250 MB por sessão (100 MB por arquivo).")
+                st.caption("Na primeira conexão, o Firewall do Windows pode pedir autorização para o Python na rede privada.")
+            action_col, _ = st.columns([1, 2])
+            if action_col.button("Encerrar sessão e invalidar QR", key="mobile_upload_close_session", use_container_width=True):
+                try:
+                    from mobile_upload import close_upload_session
+                    close_upload_session(str(session["token"]))
+                except Exception:
+                    pass
+                st.session_state.pop("_mobile_upload_session", None)
+                st.rerun()
+            _mobile_upload_inbox_monitor(spec)
+
+
 def main():
     st.set_page_config(
         page_title=brand.APP_TITLE,
@@ -4498,6 +4632,8 @@ def main():
             st.session_state["artwork_upload_revision"] += 1
             st.rerun()
 
+        _render_mobile_upload_panel(spec)
+
     art_items = st.session_state["artwork_items"]
     batch_notice = st.session_state.pop("_artwork_batch_notice", None)
     if batch_notice:
@@ -4578,7 +4714,20 @@ def main():
         pool_order = [str(item["id"]) for item in art_items]
         pool_quantities = {str(item["id"]): max(1, int(item.get("qty", 1))) for item in art_items}
         pool_selected = str(st.session_state["artwork_selected_id"])
-        st.caption("Clique na miniatura para editá-la. Use as caixas nas miniaturas para selecionar artes. A aplicação em lote fica dentro de AJUSTES GERAIS DA ARTE; ao lado da seleção há o comando contextual para excluir a seleção ou todas as artes. A posição e o zoom manuais continuam individuais. Digite a quantidade ou use +/−; arraste para ordenar a impressão.")
+        st.markdown(
+            """
+            <div style="background:rgba(24,54,79,.34);border:1px solid rgba(110,151,182,.28);border-radius:10px;padding:10px 12px;margin:0 0 12px;color:#D9E5EF;">
+              <div style="font-size:10px;font-weight:800;letter-spacing:.09em;color:#8FC9D8;margin-bottom:8px;">COMO USAR O POOL</div>
+              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:9px 16px;">
+                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Editar</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Clique na miniatura para abrir a arte no editor.</div></div>
+                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Selecionar e excluir</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Marque as caixas para selecionar artes. O botão ao lado exclui a seleção ou, sem seleção, todo o Pool.</div></div>
+                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Aplicar ajustes em lote</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Use a caixa em Ajustes Gerais da Arte. Zoom e posição manuais continuam individuais.</div></div>
+                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Quantidade e ordem</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Digite a quantidade ou use +/−. Arraste as miniaturas para ordenar a impressão.</div></div>
+              </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
 
         try:
             pool_component = get_artwork_pool_component()
@@ -4920,9 +5069,6 @@ def main():
                 if fit_mode == "cut":
                     box = image_box(selected_dimensions[0], selected_dimensions[1], spec.cut, zoom, off_x, off_y)
                     dpi = min(selected_dimensions) / ((spec.cut * zoom) / 25.4)
-                    if not covers_shape(box, spec.cut):
-                        fill_text = "o fundo desfocado" if background_mode == "blur" else "a cor sólida escolhida"
-                        st.info(f"As áreas do corte não ocupadas pela arte principal serão preenchidas por {fill_text}.")
                 else:
                     dpi = max(selected_dimensions) / ((spec.art * zoom) / 25.4)
                 if dpi < 200:

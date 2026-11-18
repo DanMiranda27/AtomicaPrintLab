@@ -43,6 +43,14 @@ if errorlevel 1 (
     if errorlevel 1 goto erro_deps
 )
 
+rem ---------- 3c. Dependencia do recebimento por QR Code ----------
+".venv\Scripts\python.exe" -c "import qrcode" >nul 2>&1
+if errorlevel 1 (
+    echo Instalando a dependencia do envio por QR Code...
+    ".venv\Scripts\python.exe" -m pip install "qrcode[pil]>=7.4"
+    if errorlevel 1 goto erro_deps
+)
+
 rem ---------- 4. Evita o pedido de e-mail do Streamlit na 1a execucao ----------
 if exist "%USERPROFILE%\.streamlit\credentials.toml" goto cred_ok
 if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"
