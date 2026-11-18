@@ -1,0 +1,153 @@
+ATOMICA PRINT LAB - CRIAR BOTTONS (v3.16)
+==========================================
+
+APLICATIVO
+----------
+Nome: Atômica Print Lab
+Slogan: Crie suas artes de forma fácil e rápida com a gente!
+
+COMO USAR (WINDOWS)
+-------------------
+1. Instale Python 3.12 (https://www.python.org/downloads/), se ainda não tiver.
+   No instalador, marque "Add python.exe to PATH".
+2. Extraia a pasta atomica_package_v3_16 em um local do computador.
+3. Execute iniciar.bat.
+
+Na primeira execução, o programa cria o ambiente virtual e instala as dependências.
+O pool visual, a ordenação por arraste e o editor visual usam Custom Components V2
+no Streamlit 1.51 ou superior. O iniciar.bat verifica/atualiza essa dependência.
+Mantenha a janela do terminal aberta enquanto usar o app.
+
+IDENTIDADE VISUAL
+-----------------
+- A logo original do átomo aparece na barra lateral, acima de INSUMOS, preservando
+  o canal alfa/transparência do PNG e o contorno delicado da imagem.
+- O cabeçalho principal mantém o nome ATÔMICA PRINT LAB maior e centralizado, com a ilustração do Erlenmeyer imediatamente à direita de LAB.
+- O título usa Gochi Hand. A fonte é carregada pelo Google Fonts quando não há
+  uma cópia local já existente em assets/GochiHand-Regular.ttf (requer internet).
+- O rodapé apresenta Atômica Print em Gochi Hand e o aviso legal de 2026.
+- A ilustração do Erlenmeyer aparece à direita de LAB no cabeçalho.
+- A paleta visual usa Ciano, Magenta, Amarelo e Preto.
+
+ORGANIZACAO E FUNCIONALIDADES
+-----------------------------
+A ferramenta permanece em uma única sessão Criar Bottons, com o mesmo pool e o
+mesmo editor visual. O preview selecionado é usado para editar a arte, exportar PNG
+e montar a folha de impressão em PDF. Os ajustes individuais por arte, quantidades,
+ordenação, preencher folha, guias, margens e espaçamentos são preservados da v3.13.
+
+ARQUIVOS
+--------
+iniciar.bat                       Inicia o app e prepara o ambiente virtual
+app.py                            Código do aplicativo
+branding.py                       Identidade visual do Atômica Print Lab
+assets/icon.png                   Ícone da aba do navegador
+assets/logo-atomica-print.png     Logo principal da barra lateral
+assets/erlenmeyer-lab.png         Ilustração de química no cabeçalho
+assets/GochiHand-Regular.ttf      Fonte opcional local (copiar da v3.14 se desejar uso offline)
+assets/OFL.txt                    Licença da fonte
+.streamlit/config.toml            Tema do Streamlit
+
+RECURSOS DE EDICAO E EXPORTACAO
+-------------------------------
+- Ao trocar o tamanho do botton, zoom e posição são recalculados usando a guia
+  Segurança como referência. A conversão compensa a guia-base (Corte ou Arte)
+  utilizada no editor e mantém o enquadramento proporcional entre tamanhos.
+- Todas as imagens recém-adicionadas começam com “Preencher até o corte” ativo
+  (zoom-base de 100%, centralizado). A opção “Encaixar na área da arte” continua
+  disponível. O botão Restaurar retorna ao preset atualmente selecionado.
+- A migração reconhece sessões antigas, inclusive artes iniciadas no botton de
+  18 mm (Segurança = 12 mm). A troca de tamanho confirma o último ajuste do editor.
+- O botão Conta-gotas permite capturar uma cor diretamente da tela em
+  navegadores compatíveis, em contexto seguro (localhost ou HTTPS).
+- O PNG individual de bottons redondos possui transparência real fora do
+  círculo. O conteúdo interno mantém a cor de fundo ou o desfoque escolhidos.
+- A transparência externa é aplicada somente ao PNG individual; o PDF e a folha
+  de impressão mantêm a composição original.
+- Os ajustes de fundo (modo, cor e intensidade do desfoque) são salvos por
+  callbacks específicos no registro da própria arte. A sincronização de zoom e
+  posição não copia esses controles, evitando que o estado de uma miniatura
+  sobrescreva o de outra.
+- O botão X do Pool processa a exclusão em um único evento para evitar que a
+  miniatura removida reapareça em uma atualização da interface.
+
+PAINEL DE FERRAMENTAS
+--------------------
+- O painel de camadas, ferramenta de texto e ferramenta de emojis não fazem
+  parte desta compilação. A inclusão dessas ferramentas fica adiada para uma
+  próxima etapa de planejamento.
+
+
+IMPRESSAO DO PDF EM TAMANHO REAL
+--------------------------------
+Os PDFs carregam a preferência de impressão sem redimensionamento. No diálogo
+de impressão, confirme “Tamanho real” ou “100%” e desative “Ajustar”, “Reduzir
+páginas grandes” ou opção equivalente, caso o leitor/driver permita essa escolha.
+A impressora ainda precisa suportar o formato de papel escolhido.
+
+
+IMPRESSAO DIRETA DA FOLHA PDF
+-----------------------------
+Depois de gerar o PDF, a seção Folha de Impressão oferece o botão “Imprimir PDF”,
+que solicita diretamente o diálogo de impressão do navegador, sem abrir uma
+prévia ou nova aba. O botão de download continua disponível separadamente. Se o
+navegador bloquear a impressão direta do PDF incorporado, baixe o arquivo e use
+Ctrl+P. No diálogo, selecione “Tamanho real” ou “100%” e desative “Ajustar à página”.
+
+SALVAMENTO INDIVIDUAL DAS ARTES
+-------------------------------
+Os ajustes de cada imagem são mantidos no registro individual da miniatura.
+Ao trocar de arte, o aplicativo restaura o modo de fundo, a intensidade do
+desfoque, a cor, o zoom e os deslocamentos daquela imagem. Ao alterar o tamanho
+do botton, a transformação é recalculada pela guia Segurança.
+
+CARREGAMENTO OTIMIZADO E AJUSTES EM LOTE
+---------------------------------------
+- As miniaturas do Pool são preparadas durante o upload, em paralelo com limite
+  de dois processos de trabalho, usando decodificação reduzida quando o formato
+  permite. O arquivo original é mantido intacto.
+- O editor e a prévia da folha usam versões leves (até 1250/1200 px) e WebP no
+  canvas; o PNG de produção e o PDF continuam utilizando o original em alta
+  resolução. A orientação EXIF é respeitada.
+- As dimensões usadas para a indicação de DPI são lidas dos metadados, sem
+  decodificar a imagem inteira em cada troca de miniatura.
+- A seleção múltipla é feita diretamente nas miniaturas do Pool. Marque uma ou
+  mais artes e use o único botão “APLICAR AJUSTES AOS SELECIONADOS”. Ele reutiliza
+  os controles atuais de Ajustes Gerais (Preencher até o corte, Encaixar na área
+  da arte, Desfoque e Cor sólida), sem criar outra seção ou controles duplicados.
+- Em modo manual, o lote não copia o zoom nem a posição da imagem em foco: cada
+  arte continua com seu enquadramento individual. Os presets ativos e as
+  propriedades do preenchimento são aplicados aos IDs selecionados.
+- A transformação manual é normalizada pela guia Segurança a partir do perfil
+  exato enviado pelo canvas. O gesto manual desativa o preset inicial e fica
+  preservado ao alternar 18 → 44 → 55 → 18 mm, sem depender de valores de widgets
+  antigos durante o rerun.
+- Todas as imagens sem edição manual começam com “Preencher até o corte” ativo.
+  O carregamento/migração corrige sessões antigas sem sobrescrever composições
+  que já foram ajustadas.
+
+
+VISUALIZACAO DA FOLHA EM TAMANHO REAL
+------------------------------------
+A prévia normal mantém o canvas centralizado com 760 px de largura, priorizando
+a visualização do layout. Para conferir o tamanho físico, use “Ver em tela cheia
+· tamanho real”. A folha é exibida inicialmente na referência de 96 CSS px por
+polegada. Como monitores e escalas do Windows variam, encoste uma régua física
+na linha de calibração de 50 mm e ajuste o controle até que a linha tenha
+exatamente 50 mm. O fator é salvo neste navegador; refaça a calibração ao
+trocar de monitor ou modificar o zoom do navegador/sistema.
+
+ATUALIZACAO DA AREA FOLHA DE IMPRESSAO
+-------------------------------------
+- A prévia está centralizada em um painel próprio, ao lado das configurações,
+  mantendo largura de até 760 px.
+- O gabarito disponível na barra lateral é SVG vetorial A4 (210 × 297 mm),
+  com as guias dimensionadas em milímetros para importação em editor gráfico.
+- A disposição é escolhida pelas opções “Grade: X por folha” e
+  “Hexagonal: Y por folha”, que também informam a capacidade calculada.
+- Quando houver mais de uma página, use os controles Página anterior,
+  Próxima página ou o seletor de página para percorrer a prévia. O visualizador
+  em tela cheia acompanha a página selecionada, enquanto o PDF exportado
+  continua incluindo o lote completo.
+- A instrução de impressão 1:1 aparece junto do botão Imprimir PDF, somente
+  depois que o PDF estiver pronto.

@@ -1,0 +1,595 @@
+ATOMICA PRINT LAB - CRIAR BOTTONS v3.16
+=======================================
+
+
+ATUALIZACAO - CALIBRACAO FISICA E AVISOS TEMPORARIOS
+---------------------------------------------------
+- As referencias circulares da visualizacao em tamanho real representam agora
+  os diametros externos de CORTE: 54 mm para o botton nominal de 44 mm e
+  70 mm para o botton nominal de 58 mm.
+- A calibracao ganhou botoes de incremento e decremento fino de 0,01%, mantendo
+  o controle deslizante como ajuste amplo e a mesma escala linear para todos
+  os diametros.
+- A regua de 100 mm passou a ser vetorial (SVG), com espacamento regular de
+  1 mm e espessura uniforme em todos os tracos.
+- As confirmacoes de aplicacao em lote e exclusao do Pool passaram a usar
+  notificacoes temporarias (toast), desaparecendo automaticamente apos alguns
+  segundos em vez de permanecerem como blocos verdes na pagina.
+
+VERSAO SEM O PAINEL DE FERRAMENTAS DE EDICAO
+-------------------------------------------
+- Esta compilacao nao inclui painel de camadas, ferramenta de texto ou ferramenta
+  de emojis. Esses recursos ficam adiados ate a definicao da estrategia de edicao.
+- O editor principal de imagem, seus controles de zoom, movimento e enquadramento
+  permanecem disponiveis.
+
+PREVIA DE AJUSTE
+----------------
+- O limite externo de corte ocupa 90% do canvas, mantendo 5% de margem em cada
+  lado e preservando o tamanho do quadro branco.
+- As guias Dobra (amarela) e Segurança (verde) usam linhas tracejadas, como a
+  guia Corte (magenta).
+- As cores das guias permanecem coerentes entre a prévia, a legenda e as demais
+  representações. Os traços coloridos têm espessura reforçada e contorno escuro.
+- As alças de redimensionamento continuam acessíveis quando a imagem ultrapassa
+  os limites visíveis do quadro.
+
+ADAPTACAO ENTRE TAMANHOS - REFERENCIA NA GUIA SEGURANCA
+------------------------------------------------------
+- A adaptação de escala e posição usa a medida real da guia Segurança como
+  referência principal, independentemente de o editor estar ancorado em Corte
+  ou Arte.
+- O zoom compensa a guia-base usada pelo editor (Corte ou Arte), de modo que a
+  escala física acompanhe a proporção da área segura do tamanho de destino.
+- Os deslocamentos horizontal e vertical também acompanham a proporção entre
+  as áreas de Segurança.
+- Cada arte mantém seu próprio perfil de referência. A referência só é atualizada
+  depois da conversão, evitando acumular alterações ao alternar entre tamanhos.
+- A migração de sessões antigas reconhece os valores anteriores de Segurança,
+  Arte ou Corte. Isso inclui o preset de 18 mm, cuja guia Segurança mede 12 mm.
+- O último movimento/zoom do editor é confirmado antes da troca do seletor de
+  tamanho, para evitar perder a transformação mais recente.
+
+COR E EXPORTACAO
+----------------
+- O seletor de cor inclui conta-gotas baseado na API EyeDropper do navegador.
+  O seletor tradicional continua disponível; o conta-gotas depende de suporte
+  do navegador e de contexto seguro (localhost ou HTTPS).
+- O PNG individual de bottons redondos possui transparência alfa real fora do
+  círculo, com borda suavizada. A cor ou o desfoque escolhido permanece dentro
+  do círculo.
+- O PNG quadrado mantém o formato quadrado. A transparência circular é aplicada
+  somente ao PNG individual; o PDF e a folha de impressão permanecem inalterados.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática do Python aprovada.
+- Testes isolados da adaptação por Segurança, incluindo migração 18 mm -> 55 mm
+  -> 18 mm, modo Corte, modo Arte e retorno sem deriva em outros pares de tamanhos.
+- Componentes JavaScript do editor e do conta-gotas validados sintaticamente.
+- Verificação do pacote ZIP e confirmação de ausência do painel/código de camadas.
+- A interface Streamlit completa não foi iniciada neste ambiente; a validação
+  visual final deve ser feita ao abrir o aplicativo localmente.
+
+PRESERVACAO DO APLICATIVO
+-------------------------
+- Pool de artes, seleção e ordenação, quantidades, prévia, guias, fundos,
+  conta-gotas, exportação PNG, cálculo da folha e exportação PDF preservados.
+- Identidade visual, branding.py e assets originais preservados.
+
+
+ESCALA FISICA NA EXPORTACAO PDF
+-------------------------------
+- As páginas continuam sendo criadas com as dimensões físicas configuradas em
+  milímetros (A4, A3, Carta ou papel personalizado).
+- Os PDFs agora incluem preferências PrintScaling=None, PrintArea=MediaBox e
+  PrintClip=MediaBox, solicitando aos leitores compatíveis impressão a 100%,
+  sem ajuste automático à área imprimível.
+- O ajuste manual no diálogo de impressão ou no driver da impressora ainda pode
+  prevalecer. Para preservar a escala, selecionar “Tamanho real” ou “100%” e
+  desativar “Ajustar à página”.
+
+CORRECOES DE ESTADO DO POOL E AJUSTES INDIVIDUAIS
+-------------------------------------------------
+- O modo de fundo, intensidade do desfoque e cor são gravados exclusivamente
+  pelos callbacks dos respectivos widgets, sempre no registro do ID da arte.
+  A sincronização geral da transformação não regrava mais esses controles,
+  impedindo que valores residuais de widgets sobrescrevam outra imagem.
+- A transformação (zoom e deslocamentos) é persistida separadamente; ao
+  selecionar uma miniatura, os controles são restaurados de seu próprio registro
+  antes de os widgets serem instanciados.
+- Valores mantidos apenas em chaves de widgets por versões anteriores são
+  migrados para o registro da mesma arte quando o campo ainda não existe nele.
+- A normalização garante IDs exclusivos para todas as artes, inclusive em
+  sessões antigas, evitando colisões entre chaves de widgets de imagens
+  diferentes. O próximo ID também é recalculado a partir dos IDs existentes.
+- A exclusão pelo botão X passou a ser um único evento. O Pool não publica
+  simultaneamente ordem e seleção antigas no mesmo clique, o que podia fazer
+  a miniatura reaparecer antes de o Python processar a remoção.
+- O callback e o fluxo principal tratam a remoção de forma idempotente,
+  impedindo duplicidade ou restauração acidental do item removido.
+- A seleção da próxima miniatura confirma e salva a arte anterior antes de
+  trocar os controles para o novo ID.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática do Python aprovada.
+- Testes isolados de IDs únicos, isolamento dos ajustes entre três artes e
+  remoção idempotente pelo Pool aprovados.
+- Sintaxe do JavaScript do Pool validada.
+- Integridade do arquivo ZIP verificada.
+- A interface Streamlit completa não foi iniciada neste ambiente; a validação
+  visual final deve ser feita ao abrir o aplicativo localmente.
+
+
+ISOLAMENTO DEFINITIVO DO ESTADO DE EDICAO POR ARTE
+-------------------------------------------------
+- O dicionário edit de cada registro passou a ser a fonte canônica dos ajustes.
+  Ao selecionar uma miniatura, os valores desse registro são restaurados antes
+  da criação dos widgets, evitando reaproveitar valores visuais residuais.
+- Os callbacks de fundo salvam somente o campo alterado (modo, intensidade ou
+  cor), em vez de copiar em bloco todos os controles de uma arte.
+- A composição da folha lê os ajustes persistidos diretamente de cada registro;
+  não regrava mais chaves de widgets de artes que não estão selecionadas.
+- A confirmação do editor anterior foi restaurada no callback de seleção do
+  Pool. O token do editor agora inclui o ID da arte, além do conteúdo da imagem
+  e do perfil físico, bloqueando respostas atrasadas de outra miniatura.
+- A conversão entre tamanhos também compensa alterações da guia-base Arte/Corte
+  quando dois modelos possuem o mesmo diâmetro de Segurança (ex.: 32/33 mm).
+
+IMPRESSAO DIRETA DO PDF
+-----------------------
+- A seção Folha de Impressão mantém somente o botão Imprimir PDF e o botão
+  independente de download; não exibe uma prévia embutida.
+- O PDF é mantido em um iframe invisível e o clique em Imprimir PDF chama
+  diretamente o diálogo de impressão do navegador, sem abrir nova aba.
+- Se o navegador bloquear a impressão programática do PDF incorporado, o
+  usuário ainda pode baixar o arquivo e abrir a impressão com Ctrl+P.
+- Para escala física 1:1, confirme Tamanho real/100% no diálogo e desative
+  Ajustar à página.
+
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática Python aprovada.
+- Quatro blocos JavaScript dos componentes validados sintaticamente.
+- Testes isolados de edição independente em três artes, ausência de cópia de
+  configurações de fundo durante a persistência da transformação, migração de
+  valores legados, restauração ao alternar miniaturas, tokens exclusivos e
+  conversão 18 -> 55 -> 18 mm sem deriva.
+- PDF de teste gerado pelo mesmo construtor da aplicação: A4 em dimensões físicas
+  corretas e preferências PrintScaling=None, PrintArea=MediaBox e
+  PrintClip=MediaBox confirmadas.
+- A interface Streamlit completa não foi iniciada neste ambiente; a validação
+  visual e o teste de impressão no navegador/impressora devem ser feitos localmente.
+
+
+CONVERSAO ESTAVEL ENTRE TAMANHOS PELA GUIA SEGURANCA
+--------------------------------------------------
+- A transformação passa a possuir uma representação canônica normalizada pela
+  guia Segurança: zoom relativo à relação entre a guia-base (Corte/Arte) e a
+  Segurança, além dos deslocamentos relativos ao diâmetro seguro.
+- Ao trocar de tamanho, o editor apenas deriva zoom e posição para as dimensões
+  do novo botton. A transformação canônica não é sobrescrita pela conversão,
+  evitando que reruns intermediários ou a montagem da folha avancem a referência
+  e causem escalas/posições incorretas.
+- O processo é reversível e não cumulativo: alternar 18 → 44 → 18 mm retorna
+  exatamente ao ajuste original, dentro da precisão numérica do editor.
+- Edições manuais feitas em qualquer tamanho atualizam a transformação
+  normalizada; os próximos tamanhos passam a usar o ajuste mais recente.
+- A migração reconhece tanto perfis completos quanto o diâmetro de Segurança
+  legado de 12 mm do preset de 18 mm.
+- Os modos Corte e Arte têm seus respectivos diâmetros-base compensados, mas
+  ambos preservam a composição em relação à guia Segurança.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática Python aprovada.
+- Testes isolados de ida/volta 18 → 44 → 18 mm sem deriva.
+- Testes de edição no tamanho intermediário e nova conversão para 55 mm e 18 mm.
+- Testes dos modos Corte e Arte, incluindo migração de sessão antiga de 18 mm.
+- A impressão direta do PDF foi mantida sem alterações nesta revisão.
+- A interface Streamlit completa não foi iniciada neste ambiente; a confirmação
+  visual final deve ser feita localmente.
+
+ENQUADRAMENTO INICIAL DA IMAGEM NO CORTE
+--------------------------------------
+- Imagens recém-adicionadas agora começam com a imagem inteira contida no limite
+  externo de Corte (contain), em vez de iniciar com o preset “Preencher até o
+  corte” (cover), que ampliava excessivamente artes retangulares.
+- O enquadramento inicial é calculado pela proporção real da imagem após correção
+  de orientação EXIF: o maior lado coincide com o diâmetro do Corte e o menor
+  lado é proporcional. O espaço que sobrar é preenchido pela cor ou pelo fundo
+  desfocado selecionado.
+- A opção “Preencher até o corte” continua disponível para ampliar a imagem até
+  cobrir todo o corte quando o usuário desejar esse enquadramento.
+- O botão “Restaurar” volta ao enquadramento inicial de contain e centraliza a
+  imagem. Seu zoom inicial também é normalizado pela guia Segurança, para manter
+  o comportamento coerente ao alternar entre diâmetros.
+- A escala mínima do editor foi reduzida para 5%, permitindo enquadrar artes com
+  proporções mais alongadas sem iniciar com corte excessivo.
+- Sessões antigas recebem uma migração de uma única vez somente quando a arte
+  ainda está no preset padrão, sem histórico de movimento/zoom. Ajustes já feitos
+  manualmente são preservados.
+- A adaptação proporcional pela guia Segurança e a impressão direta do PDF foram
+  mantidas.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática Python aprovada.
+- Testes geométricos de enquadramento contain para imagens quadradas, retrato e
+  paisagem; o maior lado da imagem coincide com o limite físico de Corte.
+- Testes da escala inicial normalizada pela Segurança e de sua conversão entre
+  18, 44 e 55 mm.
+- Sintaxe do componente JavaScript do editor validada.
+- Integridade do pacote ZIP verificada.
+- A interface Streamlit completa não foi iniciada neste ambiente; a confirmação
+  visual final deve ser feita localmente.
+
+PRESET INICIAL CONSISTENTE PARA TODAS AS IMAGENS
+------------------------------------------------
+- Todas as imagens adicionadas ao Pool passam a iniciar com o preset
+  "Preencher até o corte" ativado: zoom 100% no modo Corte, centralização e
+  estado do checkbox sincronizado.
+- A referência inicial normalizada pela guia Segurança passa a representar o
+  preset cover (corte/segurança), para que o botão Restaurar recupere o mesmo
+  comportamento em qualquer tamanho selecionado.
+- As imagens adicionadas em lote recebem seus próprios valores desde o momento
+  do upload, sem depender da seleção da primeira miniatura.
+- Antes de o Pool permitir alternar entre miniaturas, todas as artes passam por
+  uma inicialização idempotente da transformação canônica. Isso elimina a
+  diferença de primeira seleção entre a primeira, segunda, terceira ou
+  posteriores imagens.
+- Migração de sessão: artes ainda no antigo preset contain, sem histórico de
+  interação, passam uma única vez para cover. Artes com eventos de zoom,
+  movimento ou preset manual mantêm sua transformação atual; apenas o comando
+  Restaurar passa a apontar para o preset cover.
+- O salvamento individual por ID e a adaptação proporcional pela guia Segurança
+  foram preservados. A impressão direta do PDF, sem seção de prévia e sem nova
+  aba, também foi mantida sem alterações.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática Python aprovada.
+- Teste com três imagens (quadrada, retrato e paisagem): todas iniciam com zoom
+  de Corte 100% e checkbox "Preencher até o corte" ativo.
+- Teste de migração do antigo preset contain para cover, preservando imagens
+  que já possuíam histórico de edição.
+- Teste de conversão 18 → 44 → 18 mm sem deriva e sem compartilhamento de estado
+  entre as imagens do Pool.
+- Quatro blocos JavaScript dos componentes validados sintaticamente.
+- Integridade do ZIP verificada. A interface Streamlit completa ainda precisa
+  ser validada visualmente no computador do usuário.
+
+OTIMIZACAO DE RESPONSIVIDADE E CONTADOR DO POOL
+-----------------------------------------------
+- A decodificação de imagens usa fingerprint SHA-256 calculado no upload/migração;
+  os reruns não recalculam o hash completo dos arquivos já registrados.
+- A prévia do editor trabalha com imagem de até 1250 px e compressão PNG mais
+  rápida, mantendo resolução suficiente para o canvas 1000×1000.
+- A imagem de fundo desfocada é pré-renderizada em uma camada auxiliar e
+  reutilizada durante movimentos e zooms, evitando aplicar o filtro de blur a
+  cada quadro do arraste.
+- O canvas do editor só é redesenhado no rerun quando uma propriedade visual
+  realmente mudou. Alterações de margem, distribuição e controles externos que
+  não afetam o desenho não provocam redesenho desnecessário.
+- O Pool mantém o DOM das miniaturas quando imagens, ordem, quantidades e
+  seleção permanecem iguais; a alteração de margens e outros controles não
+  reconstrói nem decodifica novamente todos os cartões.
+- A prévia da folha usa cache por botton individual. Quando uma arte muda, apenas
+  os bottons correspondentes são rasterizados de novo; os demais são reutilizados.
+  A composição resultante foi comparada pixel a pixel com a rotina anterior e
+  permaneceu idêntica.
+- A prévia constrói apenas os itens necessários para a primeira página, sem
+  expandir antecipadamente milhares de cópias quando uma quantidade alta é usada.
+- A decodificação integral das imagens do Pool foi adiada até a geração real do
+  PDF; durante os reruns comuns, a edição e as miniaturas usam dados em cache.
+- O campo de quantidade do Pool foi ampliado para exibir números de até quatro
+  dígitos com clareza, tanto no layout normal quanto no responsivo.
+- As dimensões físicas, as guias, a transformação pela Segurança, o preset
+  inicial Preencher até o corte, o salvamento independente por imagem, a
+  transparência do PNG circular e a impressão direta do PDF foram preservados.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática de app.py e branding.py aprovada.
+- Sintaxe dos quatro componentes JavaScript validada com Node.js.
+- Teste de imagens quadrada, retrato e paisagem com geração da prévia da folha.
+- Comparação pixel a pixel da prévia da folha antiga e otimizada: resultado
+  idêntico (nenhuma diferença de pixels).
+- Teste de alteração isolada de uma das imagens e geração de nova prévia.
+- Verificação geométrica da largura do contador para valores de até quatro dígitos.
+- A interface Streamlit completa não foi executada neste ambiente; a confirmação
+  de responsividade e dos ganhos percebidos deve ser feita no computador local.
+
+
+CARREGAMENTO MAIS RAPIDO, RESTAURACAO DA REFERENCIA DE ESCALA E AJUSTES EM LOTE
+-------------------------------------------------------------------------------
+- Upload múltiplo: validação e criação de miniaturas são processadas com até dois
+  workers, para aproveitar paralelismo sem decodificar todas as imagens em série
+  no rerun da interface. O arquivo original é preservado para impressão.
+- As miniaturas são armazenadas com cada item do Pool e não são recriadas quando
+  o usuário reorganiza, seleciona ou altera quantidades.
+- O editor recebe WebP leve (até 1250 px) com transparência, orientação EXIF
+  corrigida e compressão de baixa latência. A folha de prévia usa fontes de até
+  1200 px; o PDF e o PNG final seguem usando o arquivo original em resolução de
+  produção.
+- A dimensão efetiva para o cálculo de DPI é obtida do cabeçalho/metadados, sem
+  carregar a imagem inteira em cada troca. A decodificação em resolução total
+  foi movida para o momento em que o usuário prepara o PNG ou gera o PDF.
+- Restaurar foi simplificado para voltar ao zoom-base de 100% do modo ativo. A
+  transformação manual mantém a normalização por Segurança, sem reutilizar um
+  zoom inicial relativo a outro tamanho de botton. Isso preserva a conversão de
+  18 → 44 → 55 → 18 mm e o preset inicial Preencher até o Corte.
+- A seleção múltipla fica diretamente nas miniaturas do Pool, por meio de uma
+  caixa em cada cartão. Um único botão “APLICAR AJUSTES AOS SELECIONADOS” reutiliza
+  os controles já existentes em Ajustes Gerais, sem criar outra seção nem um
+  segundo conjunto de controles. O estado de seleção pode incluir uma, várias
+  ou todas as artes.
+- O lote copia os presets de enquadramento marcados e o preenchimento atual
+  (modo, cor e intensidade do desfoque) somente para os IDs selecionados. Quando
+  a arte-fonte está em modo manual, copia-se o estado dos controles, mas cada
+  arte mantém seu próprio zoom e posicionamento.
+- O canvas agora envia junto com cada gesto o perfil exato das guias e a
+  transformação já normalizada pela guia Segurança. O registro da arte salva
+  diretamente esses valores e desativa o preset inicial quando há movimento ou
+  redimensionamento, mesmo se o callback visual do componente chegar fora de
+  ordem. A conversão deixa de depender dos valores do selectbox no rerun.
+- O preset “Preencher até o corte” é regra inicial para todas as imagens novas.
+  A migração também corrige imagens antigas sem histórico de edição, sem
+  sobrescrever artes que já receberam ajustes manuais.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática do Python aprovada.
+- Sintaxe dos quatro componentes JavaScript validada com Node.js.
+- Teste de upload/miniaturas para JPEG, PNG e WebP, incluindo prévia leve e
+  dimensões para cálculo de DPI.
+- Teste de conversão pela Segurança 18 → 44 → 55 → 18 sem deriva de escala ou
+  deslocamento.
+- Teste dos presets iniciais (Preencher até o Corte) e de restauração a 100%.
+- Teste de aplicação em lote somente às artes selecionadas, verificando que
+  imagens não selecionadas não mudam e que aplicar apenas preenchimento preserva
+  zoom e posição individuais.
+- A interface Streamlit completa não foi iniciada neste ambiente; a confirmação
+  visual e o ganho efetivo de velocidade devem ser verificados no computador local.
+
+
+CORRECAO FINAL DO ESTADO DE ESCALA E SELECAO EM LOTE
+-------------------------------------------------
+- A transformação manual enviada pelo canvas leva o perfil real de Corte, Arte
+  e Segurança do tamanho em que o gesto ocorreu, além das coordenadas relativas
+  à Segurança. O Python persiste os valores do evento diretamente no registro
+  daquela imagem.
+- Qualquer arraste, redimensionamento ou zoom manual desativa o preset inicial
+  como fonte de verdade; valores antigos de checkbox não podem reativá-lo durante
+  o rerun. A conversão para outro tamanho parte da última transformação manual
+  normalizada, preservando tamanho relativo e deslocamento dentro da Segurança.
+- O limite interno de zoom foi ampliado para evitar truncamento da escala ao
+  converter entre os extremos de tamanhos disponíveis.
+- O Pool não cria um painel separado de ajustes em lote: a seleção é feita nas
+  próprias miniaturas e há somente um botão de aplicação, que lê os controles
+  existentes na arte em foco.
+
+VALIDACAO TECNICA
+-----------------
+- Compilação Python aprovada.
+- Sintaxe dos componentes de edição e Pool verificada com Node.js.
+- Testes do evento real do canvas simulados em modos Corte e Arte, partindo de
+  18 mm e alternando 18 → 44 → 55 → 18 mm, inclusive com valores antigos de
+  checkbox ainda presentes na sessão.
+- Testes confirmam que o evento manual desativa o preset, preserva a proporção
+  da arte/posição em relação à Segurança e mantém Preencher até o corte como
+  estado inicial das imagens sem ajustes.
+- Aplicação em lote verificada com presets ativos e em modo manual, sem copiar
+  zoom/posição individuais quando o preenchimento é replicado.
+- A interface Streamlit completa ainda precisa de validação visual local.
+
+REVISÃO DE EXPERIÊNCIA DO POOL — 17/11/2026
+
+- O botão de seleção em lote agora alterna entre “Selecionar todas” e
+  “Desselecionar todas”, permitindo limpar rapidamente uma seleção completa.
+- O botão “APLICAR AJUSTES AOS SELECIONADOS” recebe confirmação do processamento e
+  retorna ao estado normal; há também uma proteção temporizada para impedir que
+  permaneça indefinidamente em “APLICANDO…”.
+- Os comandos de seleção e aplicação foram agrupados imediatamente acima das
+  miniaturas do Pool. “Preencher folha” foi reposicionado abaixo do Pool.
+- Ao trocar a arte em edição, o destaque da miniatura é atualizado sem desmontar
+  e recriar todo o Pool. Isso evita recarregar/decodear as imagens das miniaturas
+  em cada troca e deixa a navegação mais consistente.
+- A geração de imagem WebP usada apenas pelo editor foi ajustada para priorizar
+  velocidade de codificação. A exportação PNG/PDF continua usando os originais.
+- A lógica de adaptação relativa à guia Segurança, os presets de enquadramento,
+  o estado inicial “Preencher até o corte” e as rotinas de impressão/exportação
+  foram preservados.
+
+
+ORGANIZACAO DA SELECAO, EXCLUSAO E APLICACAO EM LOTE
+---------------------------------------------------
+- A seleção múltipla continua sendo feita diretamente nas miniaturas do Pool.
+- O Pool não contém mais um botão para aplicar ajustes; a aplicação em lote
+  foi movida para dentro de AJUSTES GERAIS DA ARTE, junto aos controles de
+  enquadramento e preenchimento. O botão reutiliza os controles existentes.
+- O comando de exclusão ao lado da seleção alterna entre EXCLUIR SELEÇÃO
+  (quando há artes marcadas) e EXCLUIR TODAS (quando não há seleção).
+- A exclusão em lote/todas solicita confirmação e remove os itens em uma única
+  operação atômica, preservando a seleção válida e salvando a transformação da
+  arte em foco antes de removê-la.
+- O caminho de fallback do Pool recebeu os mesmos comandos de selecionar todas,
+  desselecionar todas e excluir seleção/todas.
+- A interface de lote reutiliza os controles da área de ajustes gerais; não
+  duplica controles de modo de fundo, cor ou intensidade de desfoque.
+- Compilação Python, sintaxe JavaScript e testes isolados de seleção/exclusão
+  aprovados. A interface Streamlit completa ainda requer validação local.
+
+CORRECAO DA ORIENTACAO PAISAGEM E ESCALA DA PREVIA — 18/11/2026
+----------------------------------------------------------------
+- A prévia da folha passou a usar pixels por milímetro calculados pelo maior
+  lado da página. A mudança entre Retrato e Paisagem mantém a mesma escala
+  visual dos bottons; somente a proporção da folha é rotacionada.
+- A imagem da prévia é exibida na largura nativa calculada, em vez de ser
+  esticada para preencher a largura do contêiner. Isso evita que os bottons
+  pareçam mudar de tamanho apenas porque a página ficou mais larga.
+- A chave do perfil de layout passou a ignorar a rotação da página e utiliza
+  papel, lados curto/longo, tamanho do botton e formato. Alternar Retrato /
+  Paisagem não redefine margem, espaçamento ou disposição escolhidos pelo
+  usuário.
+- As margens e o espaçamento recomendados continuam sendo recalculados para a
+  orientação atual. O botão “Restaurar valores recomendados” aplica a sugestão
+  correspondente à orientação selecionada.
+- A orientação da folha permanece independente do perfil geométrico do botton
+  e da transformação da arte em relação à guia Segurança.
+- A geometria do PDF continua definida em milímetros. Foram gerados PDFs de
+  teste em A4 Retrato e Paisagem para bottons de 18, 44, 55 e 65 mm; os tamanhos
+  de página e os diâmetros das guias de Corte foram medidos no PDF e mantiveram
+  exatamente as dimensões físicas configuradas.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação Python aprovada.
+- Sintaxe dos quatro componentes JavaScript validada com Node.js.
+- Teste da chave de perfil: Retrato e Paisagem compartilham a mesma identidade
+  de configuração, preservando os valores de layout do usuário.
+- Teste de escala da prévia: um corte de 54 mm ocupa a mesma quantidade de
+  pixels em Retrato e Paisagem; somente as dimensões da folha são rotacionadas.
+- PDFs A4 em ambas as orientações verificados para 18, 44, 55 e 65 mm: MediaBox
+  e diâmetros de Corte confirmados em milímetros.
+- A interface Streamlit completa e a impressão física ainda precisam de
+  validação no computador local.
+
+
+RESTAURACAO DO CANVAS E VISUALIZACAO EM TAMANHO REAL — 18/11/2026
+-----------------------------------------------------------------
+- A prévia normal da folha voltou ao layout anterior: canvas centralizado,
+  com 760 px de largura fixa nas orientações Retrato e Paisagem. A escala
+  física aparente nesta prévia é voltada à composição visual, não à medição.
+- Foi adicionado o botão “Ver em tela cheia · tamanho real” abaixo do canvas.
+  Ele abre a primeira página da folha em tela cheia, com dimensões de página
+  representadas a 96 CSS px por polegada e rolagem para páginas maiores que
+  a área visível.
+- Como densidade física, escala do sistema operacional e zoom do navegador
+  variam entre monitores, o visualizador inclui uma calibração por régua de
+  50 mm. O fator é salvo no navegador e pode ser ajustado após trocar monitor
+  ou zoom. Assim, a visualização só deve ser considerada 1:1 depois da
+  calibração física na tela utilizada.
+- O raster da visualização física é independente do canvas normal e usa cache
+  próprio; o limite de 3200 px no maior lado evita picos de memória em papéis
+  personalizados muito grandes. A exportação PDF continua sendo vetorial/
+  definida em milímetros e não é alterada por essa visualização.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação Python aprovada.
+- Sintaxe JavaScript do novo componente validada com Node.js.
+- Geometria visual clássica verificada: canvas com 760 px de largura em A4
+  Retrato e Paisagem; as alturas acompanham a proporção da folha.
+- Dimensões de referência em 96 CSS px/pol. verificadas: A4 = 793,7 ×
+  1122,5 px; A4 Paisagem = 1122,5 × 793,7 px; corte de 54 mm = 204,1 px.
+- Fluxo de calibração usa uma régua de 50 mm e persiste o fator no navegador.
+- A interface Streamlit completa e a calibração física ainda precisam de
+  validação local no computador/monitor do usuário.
+
+ORGANIZACAO DA AREA FOLHA DE IMPRESSAO
+--------------------------------------
+- Os controles de papel, orientação, dimensões personalizadas, margem,
+  espaçamento, disposição e guias impressas foram movidos da barra lateral para
+  um painel de configuração ao lado do canvas da folha.
+- A barra lateral fica dedicada aos insumos e à escolha do tamanho do botton,
+  reduzindo a rolagem lateral.
+- A prévia da folha mantém a largura atual de 760 px e continua centralizada na
+  coluna de visualização, em Retrato e Paisagem.
+- Os valores da folha são lidos do session_state antes da montagem do Pool;
+  assim, capacidade, preenchimento da folha, prévia e PDF continuam usando as
+  configurações atuais mesmo com os widgets renderizados junto ao canvas.
+- A troca de orientação continua preservando margens, espaçamento e disposição
+  personalizados. O botão de restaurar recomendações e o download do gabarito
+  foram mantidos no painel da folha.
+- A adaptação por Segurança, o enquadramento inicial Preencher até o corte, o
+  salvamento individual, a escala real do PDF, a impressão direta e a
+  visualização calibrável em tela cheia foram preservados.
+
+VALIDACAO DESTA REVISAO
+----------------------
+- Compilação sintática do Python aprovada.
+- Verificação estrutural: controles de folha fora da sidebar e dentro do painel
+  ao lado do canvas.
+- Largura do canvas mantida em 760 px; as colunas internas foram ajustadas para
+  centralizar a prévia na coluna de visualização.
+- Funções de geometria, adaptação por Segurança, renderização da folha, geração
+  de PDF e visualizador de tamanho real permanecem inalteradas.
+- A interface Streamlit completa não foi iniciada neste ambiente; a validação
+  visual final deve ser feita ao abrir o aplicativo localmente.
+
+REFINO DA AREA DA FOLHA, GABARITO SVG E PAGINACAO DA PREVIA
+---------------------------------------------------------
+- A prévia da folha foi colocada em um painel interno com borda, ao lado dos
+  controles da própria folha. O canvas permanece com largura máxima de 760 px,
+  é centralizado no painel e reduz proporcionalmente quando a janela é estreita.
+- O painel CONFIGURAÇÃO DA FOLHA usa título próprio, com quebra de linha e sem
+  marcador circular, evitando que o texto ultrapasse os limites do componente.
+- O gabarito foi movido para a barra lateral esquerda e passou de PDF de página
+  personalizada para SVG vetorial A4 (210 × 297 mm). As formas/linhas das guias
+  usam coordenadas em milímetros e preservam o diâmetro nominal de Corte, Dobra,
+  Arte e Segurança ao importar em um editor vetorial.
+- A seleção de disposição deixou o antigo controle lateral. As próprias opções
+  “Grade: X por folha” e “Hexagonal: Y por folha” passaram a ser o seletor
+  funcional de distribuição, exibindo simultaneamente a capacidade calculada.
+- A prévia da folha agora permite navegar entre páginas quando a quantidade de
+  bottons ultrapassa a capacidade de uma página. A seleção da página também é
+  refletida no visualizador em tela cheia; a exportação PDF continua incluindo
+  todas as páginas.
+- A instrução sobre impressão 1:1 aparece somente quando o botão Imprimir PDF
+  está disponível, com o texto: “O botão Imprimir PDF solicita diretamente o
+  diálogo de impressão do navegador, sem abrir prévia ou nova aba. Para manter
+  a escala física 1:1, escolha Tamanho real/100% e desative Ajustar à página.”
+- O título EXPORTAR ARTE EM FOCO foi padronizado em maiúsculas.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática de app.py e branding.py aprovada.
+- SVGs de tamanhos redondos e quadrado validados por parser XML; prancheta
+  confirmada em 210 × 297 mm e diâmetro/largura da guia Corte conferido contra
+  as medidas reais de 18, 44, 55, 50 × 50 e 88 mm.
+- Teste da distribuição de itens em páginas: itens e quantidades que atravessam
+  o limite entre duas páginas foram separados na ordem correta.
+- A interface Streamlit completa não foi iniciada neste ambiente; alinhamento
+  visual e comportamento interativo final devem ser conferidos localmente.
+
+GABARITO SVG A4 COLORIDO E COM FUNDO TRANSPARENTE
+------------------------------------------------
+- O gabarito exportado na barra lateral é SVG vetorial em A4 real (210 × 297 mm),
+  com viewBox de 210 × 297 unidades correspondentes a milímetros.
+- Todas as guias usam cores próprias: Corte magenta, Dobra amarela, Arte azul e
+  Segurança verde. As linhas possuem contorno escuro fino para manter a leitura
+  da guia amarela sobre áreas claras sem perder sua cor de identificação.
+- O arquivo não contém retângulo branco nem preenchimento de página. A prancheta
+  e as áreas externas às linhas permanecem transparentes ao importar em editores
+  vetoriais compatíveis com SVG.
+- A geometria e os textos estão em unidades físicas milimétricas; o arquivo pode
+  ser importado em software vetorial mantendo a prancheta A4 e a escala 1:1.
+
+VALIDACAO DO GABARITO SVG
+-------------------------
+- SVG redondo e quadrado analisados com parser XML.
+- Prancheta confirmada em 210 × 297 mm, com viewBox 0 0 210 297.
+- Quatro cores das guias confirmadas no vetor: #E5457B, #FFFF00, #2F9BD8 e
+  #00F919; contorno escuro auxiliar #243447 para contraste.
+- Rasterização de teste em RGBA confirmou alfa zero no canto da página, isto é,
+  ausência de fundo opaco.
+- Compilação Python e sintaxe dos cinco módulos JavaScript aprovadas.
+- A interface Streamlit completa não foi executada neste ambiente; conferir a
+  aparência visual final e a importação em seu editor vetorial localmente.
+
+
+ATUALIZACAO - MEDIDA DO CORTE E ORIENTACOES DO POOL
+---------------------------------------------------
+- O diâmetro externo de corte do botton nominal de 58 mm foi corrigido de
+  68 mm para 70 mm na tabela de especificações do aplicativo. A correção
+  repercute no editor, na adaptação pelas guias, no cálculo de encaixe da folha,
+  no PDF e no gabarito SVG, todos derivados da mesma especificação.
+- A referência física do visualizador em tamanho real agora compara 54 mm
+  (corte do botton nominal de 44 mm) e 70 mm (corte do botton nominal de 58 mm).
+- A mensagem redundante abaixo do canvas individual foi removida; as informações
+  sobre fundo e preenchimento permanecem visíveis nos próprios controles.
+- As instruções do Pool foram reorganizadas em quatro blocos compactos: editar,
+  selecionar/excluir, aplicar ajustes em lote e definir quantidade/ordem.

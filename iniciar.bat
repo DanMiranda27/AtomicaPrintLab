@@ -1,0 +1,92 @@
+@echo off
+setlocal
+cd /d "%~dp0"
+title Atomica Print Lab
+
+echo ============================================
+echo   Atomica Print Lab
+echo ============================================
+echo.
+
+rem ---------- 1. Localizar o Python ----------
+set "PY="
+py -3 --version >nul 2>&1 && set "PY=py -3"
+if not defined PY (
+    python --version >nul 2>&1 && set "PY=python"
+)
+if not defined PY goto sem_python
+
+%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)"
+if errorlevel 1 goto python_antigo
+
+rem ---------- 2. Ambiente virtual (so na primeira vez) ----------
+if exist ".venv\Scripts\python.exe" goto venv_ok
+echo Criando ambiente virtual, so na primeira vez...
+%PY% -m venv .venv
+if errorlevel 1 goto erro_venv
+:venv_ok
+
+rem ---------- 3. Dependencias (so na primeira vez) ----------
+if exist ".venv\.dependencias_ok" goto deps_ok
+echo Instalando dependencias, pode levar alguns minutos...
+".venv\Scripts\python.exe" -m pip install --upgrade pip
+".venv\Scripts\python.exe" -m pip install -r requirements.txt
+if errorlevel 1 goto erro_deps
+echo ok>".venv\.dependencias_ok"
+:deps_ok
+
+rem ---------- 3b. Garantir suporte ao pool visual de miniaturas e editor de imagem ----------
+".venv\Scripts\python.exe" -c "import streamlit as st; v=tuple(map(int,st.__version__.split('.')[:2])); assert v >= (1,51) and hasattr(st.components, 'v2')" >nul 2>&1
+if errorlevel 1 (
+    echo Atualizando Streamlit para habilitar o pool visual, o arraste e o editor visual...
+    ".venv\Scripts\python.exe" -m pip install --upgrade "streamlit>=1.51"
+    if errorlevel 1 goto erro_deps
+)
+
+rem ---------- 4. Evita o pedido de e-mail do Streamlit na 1a execucao ----------
+if exist "%USERPROFILE%\.streamlit\credentials.toml" goto cred_ok
+if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"
+> "%USERPROFILE%\.streamlit\credentials.toml" (
+    echo [general]
+    echo email = ""
+)
+:cred_ok
+
+rem ---------- 5. Iniciar o app ----------
+echo.
+echo Abrindo o app no navegador: http://localhost:8501
+echo Para encerrar, feche esta janela ou pressione Ctrl+C.
+echo.
+".venv\Scripts\python.exe" -m streamlit run app.py
+if errorlevel 1 pause
+exit /b
+
+:sem_python
+echo [ERRO] Python nao foi encontrado neste computador.
+echo.
+echo Instale o Python 3.12 em https://www.python.org/downloads/
+echo e marque a opcao "Add python.exe to PATH" no instalador.
+echo Depois execute este arquivo novamente.
+echo.
+pause
+exit /b 1
+
+:python_antigo
+echo [ERRO] E necessario o Python 3.9 ou superior.
+echo Instale uma versao mais recente em https://www.python.org/downloads/
+echo.
+pause
+exit /b 1
+
+:erro_venv
+echo [ERRO] Nao foi possivel criar o ambiente virtual.
+echo.
+pause
+exit /b 1
+
+:erro_deps
+echo [ERRO] Falha ao instalar as dependencias. Verifique a conexao com a internet
+echo e execute este arquivo novamente.
+echo.
+pause
+exit /b 1
