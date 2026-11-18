@@ -1,6 +1,16 @@
 ATOMICA PRINT LAB - CRIAR BOTTONS v3.16
 =======================================
 
+ATUALIZACAO - GUIA DE CORTE CONFIGURAVEL
+---------------------------------------
+- O diâmetro da guia magenta (Corte) pode ser ajustado individualmente por
+  tamanho de botton, partindo da medida padrão já definida.
+- O limite mínimo é a medida da guia Dobra; o limite máximo é 5 mm acima do
+  diâmetro padrão de Corte daquele tamanho.
+- O ajuste de cada tamanho permanece salvo ao alternar entre bottons e voltar
+  ao tamanho anteriormente configurado.
+- As medidas de Dobra, Arte e Segurança permanecem inalteradas.
+
 
 ATUALIZACAO - CALIBRACAO FISICA E AVISOS TEMPORARIOS
 ---------------------------------------------------

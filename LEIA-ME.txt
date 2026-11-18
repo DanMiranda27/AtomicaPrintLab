@@ -35,6 +35,9 @@ A ferramenta permanece em uma única sessão Criar Bottons, com o mesmo pool e o
 mesmo editor visual. O preview selecionado é usado para editar a arte, exportar PNG
 e montar a folha de impressão em PDF. Os ajustes individuais por arte, quantidades,
 ordenação, preencher folha, guias, margens e espaçamentos são preservados da v3.13.
+- A guia magenta de Corte pode ser ajustada por tamanho: da medida da guia
+  Dobra até 5 mm acima do Corte padrão. Cada tamanho mantém seu próprio valor
+  ao alternar entre bottons; Dobra, Arte e Segurança não são alteradas.
 
 ARQUIVOS
 --------

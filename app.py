@@ -18,7 +18,7 @@ import base64
 import hashlib
 import io
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from typing import Literal
 
 import streamlit as st
@@ -80,6 +80,34 @@ BUTTONS: dict[str, ButtonSpec] = dict(sorted({
     "65 mm": ButtonSpec(size=65, cut=75, fold=71, art=65, safe=61),
     "88 mm": ButtonSpec(size=88, cut=98, fold=94, art=88, safe=84),
 }.items(), key=lambda item: item[1].size))
+
+
+def _cut_diameter_widget_key(size_key: str) -> str:
+    """Chave independente para preservar o corte personalizado de cada tamanho."""
+    return f"custom_cut_diameter_mm::{size_key}"
+
+
+def _clamp_cut_diameter(value, base_spec: ButtonSpec) -> float:
+    """Limita o corte entre a guia da Dobra e 5 mm acima do corte padrão."""
+    try:
+        diameter = float(value)
+    except (TypeError, ValueError):
+        diameter = float(base_spec.cut)
+    if not math.isfinite(diameter):
+        diameter = float(base_spec.cut)
+    diameter = max(float(base_spec.fold), min(float(base_spec.cut) + 5.0, diameter))
+    return round(diameter, 2)
+
+
+def _save_cut_diameter_for_size(size_key: str, widget_key: str) -> None:
+    """Guarda o ajuste do corte sem alterar as demais guias ou perfis."""
+    base_spec = BUTTONS.get(str(size_key))
+    if base_spec is None:
+        return
+    diameter = _clamp_cut_diameter(st.session_state.get(widget_key), base_spec)
+    st.session_state[widget_key] = diameter
+    overrides = st.session_state.setdefault("_cut_diameter_overrides", {})
+    overrides[str(size_key)] = diameter
 
 # Ordem: da mais externa para a mais interna
 GUIDES: tuple[Guide, ...] = (
@@ -4463,7 +4491,42 @@ def main():
             "Tamanho do botton", size_options, key="single_size",
             on_change=_commit_selected_artwork_before_size_change,
         )
-        spec = BUTTONS[size_key]
+        base_spec = BUTTONS[size_key]
+        cut_overrides = st.session_state.setdefault("_cut_diameter_overrides", {})
+        cut_widget_key = _cut_diameter_widget_key(size_key)
+        if cut_widget_key not in st.session_state:
+            initial_cut = cut_overrides.get(size_key, base_spec.cut)
+            st.session_state[cut_widget_key] = _clamp_cut_diameter(initial_cut, base_spec)
+        else:
+            # Revalida o estado ao voltar a um tamanho, sem deixar que um valor
+            # antigo ultrapasse os limites físicos do perfil selecionado.
+            st.session_state[cut_widget_key] = _clamp_cut_diameter(
+                st.session_state[cut_widget_key], base_spec
+            )
+
+        st.number_input(
+            "Diâmetro da guia magenta · Corte (mm)",
+            min_value=float(base_spec.fold),
+            max_value=float(base_spec.cut) + 5.0,
+            step=0.5,
+            format="%.1f",
+            key=cut_widget_key,
+            on_change=_save_cut_diameter_for_size,
+            args=(size_key, cut_widget_key),
+            help=(
+                f"Padrão: {base_spec.cut:g} mm. O valor pode variar da guia da Dobra "
+                f"({base_spec.fold:g} mm) até 5 mm acima do corte padrão "
+                f"({base_spec.cut + 5:g} mm). As guias Dobra, Arte e Segurança "
+                "mantêm suas medidas originais."
+            ),
+        )
+        cut_diameter = _clamp_cut_diameter(st.session_state[cut_widget_key], base_spec)
+        cut_overrides[size_key] = cut_diameter
+        spec = replace(base_spec, cut=cut_diameter)
+        st.caption(
+            f"Padrão: {base_spec.cut:g} mm · Limites: {base_spec.fold:g} a "
+            f"{base_spec.cut + 5:g} mm. O ajuste deste tamanho fica salvo ao alternar bottons."
+        )
         st.markdown(legend_html(spec), unsafe_allow_html=True)
         st.divider()
         gabarito_svg = build_template_svg(spec)
