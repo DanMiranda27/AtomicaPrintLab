@@ -1,6 +1,21 @@
 ATOMICA PRINT LAB - CRIAR BOTTONS v3.16
 =======================================
 
+
+ATUALIZACAO - CALIBRACAO FISICA E AVISOS TEMPORARIOS
+---------------------------------------------------
+- As referencias circulares da visualizacao em tamanho real representam agora
+  os diametros externos de CORTE: 54 mm para o botton nominal de 44 mm e
+  68 mm para o botton nominal de 58 mm.
+- A calibracao ganhou botoes de incremento e decremento fino de 0,01%, mantendo
+  o controle deslizante como ajuste amplo e a mesma escala linear para todos
+  os diametros.
+- A regua de 100 mm passou a ser vetorial (SVG), com espacamento regular de
+  1 mm e espessura uniforme em todos os tracos.
+- As confirmacoes de aplicacao em lote e exclusao do Pool passaram a usar
+  notificacoes temporarias (toast), desaparecendo automaticamente apos alguns
+  segundos em vez de permanecerem como blocos verdes na pagina.
+
 VERSAO SEM O PAINEL DE FERRAMENTAS DE EDICAO
 -------------------------------------------
 - Esta compilacao nao inclui painel de camadas, ferramenta de texto ou ferramenta
@@ -473,3 +488,94 @@ VALIDACAO TECNICA DESTA REVISAO
 - Fluxo de calibração usa uma régua de 50 mm e persiste o fator no navegador.
 - A interface Streamlit completa e a calibração física ainda precisam de
   validação local no computador/monitor do usuário.
+
+ORGANIZACAO DA AREA FOLHA DE IMPRESSAO
+--------------------------------------
+- Os controles de papel, orientação, dimensões personalizadas, margem,
+  espaçamento, disposição e guias impressas foram movidos da barra lateral para
+  um painel de configuração ao lado do canvas da folha.
+- A barra lateral fica dedicada aos insumos e à escolha do tamanho do botton,
+  reduzindo a rolagem lateral.
+- A prévia da folha mantém a largura atual de 760 px e continua centralizada na
+  coluna de visualização, em Retrato e Paisagem.
+- Os valores da folha são lidos do session_state antes da montagem do Pool;
+  assim, capacidade, preenchimento da folha, prévia e PDF continuam usando as
+  configurações atuais mesmo com os widgets renderizados junto ao canvas.
+- A troca de orientação continua preservando margens, espaçamento e disposição
+  personalizados. O botão de restaurar recomendações e o download do gabarito
+  foram mantidos no painel da folha.
+- A adaptação por Segurança, o enquadramento inicial Preencher até o corte, o
+  salvamento individual, a escala real do PDF, a impressão direta e a
+  visualização calibrável em tela cheia foram preservados.
+
+VALIDACAO DESTA REVISAO
+----------------------
+- Compilação sintática do Python aprovada.
+- Verificação estrutural: controles de folha fora da sidebar e dentro do painel
+  ao lado do canvas.
+- Largura do canvas mantida em 760 px; as colunas internas foram ajustadas para
+  centralizar a prévia na coluna de visualização.
+- Funções de geometria, adaptação por Segurança, renderização da folha, geração
+  de PDF e visualizador de tamanho real permanecem inalteradas.
+- A interface Streamlit completa não foi iniciada neste ambiente; a validação
+  visual final deve ser feita ao abrir o aplicativo localmente.
+
+REFINO DA AREA DA FOLHA, GABARITO SVG E PAGINACAO DA PREVIA
+---------------------------------------------------------
+- A prévia da folha foi colocada em um painel interno com borda, ao lado dos
+  controles da própria folha. O canvas permanece com largura máxima de 760 px,
+  é centralizado no painel e reduz proporcionalmente quando a janela é estreita.
+- O painel CONFIGURAÇÃO DA FOLHA usa título próprio, com quebra de linha e sem
+  marcador circular, evitando que o texto ultrapasse os limites do componente.
+- O gabarito foi movido para a barra lateral esquerda e passou de PDF de página
+  personalizada para SVG vetorial A4 (210 × 297 mm). As formas/linhas das guias
+  usam coordenadas em milímetros e preservam o diâmetro nominal de Corte, Dobra,
+  Arte e Segurança ao importar em um editor vetorial.
+- A seleção de disposição deixou o antigo controle lateral. As próprias opções
+  “Grade: X por folha” e “Hexagonal: Y por folha” passaram a ser o seletor
+  funcional de distribuição, exibindo simultaneamente a capacidade calculada.
+- A prévia da folha agora permite navegar entre páginas quando a quantidade de
+  bottons ultrapassa a capacidade de uma página. A seleção da página também é
+  refletida no visualizador em tela cheia; a exportação PDF continua incluindo
+  todas as páginas.
+- A instrução sobre impressão 1:1 aparece somente quando o botão Imprimir PDF
+  está disponível, com o texto: “O botão Imprimir PDF solicita diretamente o
+  diálogo de impressão do navegador, sem abrir prévia ou nova aba. Para manter
+  a escala física 1:1, escolha Tamanho real/100% e desative Ajustar à página.”
+- O título EXPORTAR ARTE EM FOCO foi padronizado em maiúsculas.
+
+VALIDACAO TECNICA DESTA REVISAO
+-------------------------------
+- Compilação sintática de app.py e branding.py aprovada.
+- SVGs de tamanhos redondos e quadrado validados por parser XML; prancheta
+  confirmada em 210 × 297 mm e diâmetro/largura da guia Corte conferido contra
+  as medidas reais de 18, 44, 55, 50 × 50 e 88 mm.
+- Teste da distribuição de itens em páginas: itens e quantidades que atravessam
+  o limite entre duas páginas foram separados na ordem correta.
+- A interface Streamlit completa não foi iniciada neste ambiente; alinhamento
+  visual e comportamento interativo final devem ser conferidos localmente.
+
+GABARITO SVG A4 COLORIDO E COM FUNDO TRANSPARENTE
+------------------------------------------------
+- O gabarito exportado na barra lateral é SVG vetorial em A4 real (210 × 297 mm),
+  com viewBox de 210 × 297 unidades correspondentes a milímetros.
+- Todas as guias usam cores próprias: Corte magenta, Dobra amarela, Arte azul e
+  Segurança verde. As linhas possuem contorno escuro fino para manter a leitura
+  da guia amarela sobre áreas claras sem perder sua cor de identificação.
+- O arquivo não contém retângulo branco nem preenchimento de página. A prancheta
+  e as áreas externas às linhas permanecem transparentes ao importar em editores
+  vetoriais compatíveis com SVG.
+- A geometria e os textos estão em unidades físicas milimétricas; o arquivo pode
+  ser importado em software vetorial mantendo a prancheta A4 e a escala 1:1.
+
+VALIDACAO DO GABARITO SVG
+-------------------------
+- SVG redondo e quadrado analisados com parser XML.
+- Prancheta confirmada em 210 × 297 mm, com viewBox 0 0 210 297.
+- Quatro cores das guias confirmadas no vetor: #E5457B, #FFFF00, #2F9BD8 e
+  #00F919; contorno escuro auxiliar #243447 para contraste.
+- Rasterização de teste em RGBA confirmou alfa zero no canto da página, isto é,
+  ausência de fundo opaco.
+- Compilação Python e sintaxe dos cinco módulos JavaScript aprovadas.
+- A interface Streamlit completa não foi executada neste ambiente; conferir a
+  aparência visual final e a importação em seu editor vetorial localmente.
