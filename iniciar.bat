@@ -10,13 +10,15 @@ echo.
 
 rem ---------- 1. Localizar o Python ----------
 set "PY="
-py -3 --version >nul 2>&1 && set "PY=py -3"
+py -3.12 --version >nul 2>&1 && set "PY=py -3.12"
+if not defined PY py -3.13 --version >nul 2>&1 && set "PY=py -3.13"
+if not defined PY py -3.11 --version >nul 2>&1 && set "PY=py -3.11"
 if not defined PY (
     python --version >nul 2>&1 && set "PY=python"
 )
 if not defined PY goto sem_python
 
-%PY% -c "import sys; sys.exit(0 if sys.version_info >= (3,9) else 1)"
+%PY% -c "import sys; sys.exit(0 if (sys.version_info >= (3,11) and sys.version_info < (3,14)) else 1)"
 if errorlevel 1 goto python_antigo
 
 rem ---------- 2. Ambiente virtual (so na primeira vez) ----------
@@ -35,11 +37,11 @@ if errorlevel 1 goto erro_deps
 echo ok>".venv\.dependencias_ok"
 :deps_ok
 
-rem ---------- 3b. Garantir suporte ao pool visual de miniaturas e editor de imagem ----------
-".venv\Scripts\python.exe" -c "import streamlit as st; v=tuple(map(int,st.__version__.split('.')[:2])); assert v >= (1,51) and hasattr(st.components, 'v2')" >nul 2>&1
+rem ---------- 3b. Garantir Streamlit atual (corrige timeout do uploader nativo no Android) ----------
+".venv\Scripts\python.exe" -c "import streamlit as st; v=tuple(map(int,st.__version__.split('.')[:2])); assert v >= (1,67) and hasattr(st.components, 'v2')" >nul 2>&1
 if errorlevel 1 (
-    echo Atualizando Streamlit para habilitar o pool visual, o arraste e o editor visual...
-    ".venv\Scripts\python.exe" -m pip install --upgrade "streamlit>=1.51"
+    echo Atualizando Streamlit para os componentes visuais e a estabilidade do uploader nativo em celulares...
+    ".venv\Scripts\python.exe" -m pip install --upgrade "streamlit>=1.67.0"
     if errorlevel 1 goto erro_deps
 )
 
@@ -48,6 +50,15 @@ rem ---------- 3c. Dependencia do recebimento por QR Code ----------
 if errorlevel 1 (
     echo Instalando a dependencia do envio por QR Code...
     ".venv\Scripts\python.exe" -m pip install "qrcode[pil]>=7.4"
+    if errorlevel 1 goto erro_deps
+)
+
+
+rem ---------- 3d. Removedor de fundos com IA (backend CPU) ----------
+".venv\Scripts\python.exe" -c "import rembg, onnxruntime" >nul 2>&1
+if errorlevel 1 (
+    echo Instalando o removedor de fundos com IA...
+    ".venv\Scripts\python.exe" -m pip install "rembg[cpu]>=2.0.87"
     if errorlevel 1 goto erro_deps
 )
 
@@ -72,7 +83,7 @@ exit /b
 :sem_python
 echo [ERRO] Python nao foi encontrado neste computador.
 echo.
-echo Instale o Python 3.12 em https://www.python.org/downloads/
+echo Instale o Python 3.11, 3.12 ou 3.13 em https://www.python.org/downloads/
 echo e marque a opcao "Add python.exe to PATH" no instalador.
 echo Depois execute este arquivo novamente.
 echo.
@@ -80,7 +91,7 @@ pause
 exit /b 1
 
 :python_antigo
-echo [ERRO] E necessario o Python 3.9 ou superior.
+echo [ERRO] E necessario o Python 3.11, 3.12 ou 3.13.
 echo Instale uma versao mais recente em https://www.python.org/downloads/
 echo.
 pause

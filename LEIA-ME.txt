@@ -1,5 +1,24 @@
-ATOMICA PRINT LAB - CRIAR BOTTONS (v3.16)
+ATOMICA PRINT LAB - CRIAR BOTTONS (v3.42)
 ==========================================
+
+
+NOVIDADES DA VERSAO 3.42
+-----------------------
+- Os controles de selecao que antes usavam st.checkbox agora usam botoes nativos
+  com aparencia de caixa marcada/desmarcada. Isso evita a falha de toque dos
+  checkboxes nativos em alguns navegadores de celulares e tablets.
+- A troca preserva os estados booleanos, callbacks e regras de prioridade das
+  ferramentas individuais, do ajuste em lote e das guias impressas.
+- As listas fixas nao permitem digitar nem adicionar valores.
+- O uploader principal continua sendo o st.file_uploader normal do navegador.
+  O pacote exige Streamlit 1.67.0 ou superior e o iniciar.bat atualiza ambientes
+  virtuais antigos automaticamente. Isso incorpora a correcao Android do
+  Streamlit 1.52.0 para a espera no seletor nativo de arquivos.
+- A sessao WebSocket tolera pausas de ate 60 segundos antes de expirar e mantem
+  o estado da sessao desconectada por ate 15 minutos. Arquivos validos seguem
+  sendo adicionados mesmo se outro arquivo do mesmo envio falhar.
+- Textos da Folha de Impressao recebem quebra de linha reforcada para tablets
+  e celulares, evitando cortes de rótulos, metricas e mensagens em azul.
 
 APLICATIVO
 ----------
@@ -9,13 +28,16 @@ Slogan: Crie suas artes de forma fácil e rápida com a gente!
 COMO USAR (WINDOWS)
 -------------------
 1. Instale Python 3.12 (https://www.python.org/downloads/), se ainda não tiver.
-   No instalador, marque "Add python.exe to PATH".
-2. Extraia a pasta atomica_package_v3_16 em um local do computador.
+   Esta versão requer Python 3.11, 3.12 ou 3.13. Marque "Add python.exe to PATH".
+2. Extraia a pasta atomica_package_v3_42 em um local do computador.
 3. Execute iniciar.bat.
 
 Na primeira execução, o programa cria o ambiente virtual e instala as dependências.
+O removedor de fundos usa IA local em CPU. Na primeira remoção, o modelo U²-Net
+é baixado automaticamente (é necessária conexão com a internet); depois, fica
+armazenado em cache no computador.
 O pool visual, a ordenação por arraste e o editor visual usam Custom Components V2
-no Streamlit 1.51 ou superior. O iniciar.bat verifica/atualiza essa dependência.
+no Streamlit 1.67 ou superior. O iniciar.bat verifica/atualiza essa dependência.
 Mantenha a janela do terminal aberta enquanto usar o app.
 
 IDENTIDADE VISUAL
@@ -35,6 +57,13 @@ A ferramenta permanece em uma única sessão Criar Bottons, com o mesmo pool e o
 mesmo editor visual. O preview selecionado é usado para editar a arte, exportar PNG
 e montar a folha de impressão em PDF. Os ajustes individuais por arte, quantidades,
 ordenação, preencher folha, guias, margens e espaçamentos são preservados da v3.13.
+- O editor possui três áreas principais: Enquadrar, Luz e cor e Fundo & Borda. Os ajustes
+  em lote ficam em uma seção compacta separada, logo abaixo do título do painel.
+- A prévia mantém o mesmo enquadramento, escala e preenchimento ao alternar entre
+  as áreas de edição; os valores são carregados diretamente do estado salvo da arte.
+- A navegação das três áreas usa um controle segmentado nativo do Streamlit,
+  com os três rótulos completos e distribuição horizontal uniforme. A legenda
+  das guias fica abaixo da prévia.
 - A guia magenta de Corte pode ser ajustada por tamanho: da medida da guia
   Dobra até 5 mm acima do Corte padrão. Cada tamanho mantém seu próprio valor
   ao alternar entre bottons; Dobra, Arte e Segurança não são alteradas.
@@ -61,8 +90,9 @@ RECURSOS DE EDICAO E EXPORTACAO
   disponível. O botão Restaurar retorna ao preset atualmente selecionado.
 - A migração reconhece sessões antigas, inclusive artes iniciadas no botton de
   18 mm (Segurança = 12 mm). A troca de tamanho confirma o último ajuste do editor.
-- O botão Conta-gotas permite capturar uma cor diretamente da tela em
-  navegadores compatíveis, em contexto seguro (localhost ou HTTPS).
+- Os campos Cor de base (Desfoque) e Cor de fundo (Cor sólida) usam o seletor
+  nativo de cor. No Chrome/Edge para desktop, o próprio seletor inclui conta-gotas;
+  em outros navegadores, a seleção disponível depende do navegador e do sistema.
 - O PNG individual de bottons redondos possui transparência real fora do
   círculo. O conteúdo interno mantém a cor de fundo ou o desfoque escolhidos.
 - A transparência externa é aplicada somente ao PNG individual; o PDF e a folha
@@ -104,20 +134,55 @@ Ao trocar de arte, o aplicativo restaura o modo de fundo, a intensidade do
 desfoque, a cor, o zoom e os deslocamentos daquela imagem. Ao alterar o tamanho
 do botton, a transformação é recalculada pela guia Segurança.
 
+CORRECAO DE IMAGEM E REMOCAO DE FUNDO
+-------------------------------------
+- O painel “Luz, cor e textura” inclui temperatura e matiz do balanço de brancos,
+  exposição em EV, contraste, saturação, matiz de cor e nitidez.
+- A prévia de ajuste é atualizada a cada alteração. Os mesmos pixels corrigidos
+  são usados nas folhas de impressão, no PDF e no PNG individual.
+- “Restaurar ajustes da imagem” retorna os controles aos valores neutros e
+  recupera a imagem original, inclusive depois de várias alterações.
+- “Remover fundo” usa IA local (rembg/U²-Net) em CPU e mantém transparência no
+  recorte. As áreas transparentes recebem a cor definida em “Cor de fundo”.
+- “Restaurar fundo” recupera a foto/arte original. O arquivo de origem é sempre
+  preservado; as correções são recalculadas sobre ele, sem empilhar filtros.
+- Correções de luz, cor e textura podem ser aplicadas em lote às artes
+  selecionadas. A remoção de fundo por IA e o fundo personalizado permanecem individuais.
+- Na primeira remoção, o modelo U²-Net é baixado pela internet e armazenado
+  localmente. Depois disso, a inferência ocorre no próprio computador, sem
+  enviar as imagens a um serviço externo.
+
+
+FUNDO PERSONALIZADO PARA BORDAS
+-------------------------------
+- A área “Fundo” permite carregar PNG, JPG, JPEG ou WEBP de até 20 MB como
+  imagem de fundo independente da arte principal.
+- A imagem personalizada cobre toda a guia Corte, com ajuste proporcional
+  preenchendo a área externa. A arte principal fica limitada à guia Arte,
+  deixando visível a faixa entre Arte e Corte para criar bordas personalizadas.
+- A remoção de fundo por IA continua disponível e pode ser combinada com a
+  imagem de borda. A transparência da arte principal revela o fundo personalizado.
+- Remover a imagem de fundo restaura o enquadramento anterior. A imagem principal
+  e a imagem de borda são mantidas separadamente por arte.
+- O fundo personalizado é aplicado à prévia, ao PNG individual e à folha/PDF.
+  O arquivo carregado não é alterado pelas correções de luz, cor e textura da arte.
+- O fundo personalizado é salvo por arte e não é copiado pelo comando de aplicação em lote.
+
 CARREGAMENTO OTIMIZADO E AJUSTES EM LOTE
 ---------------------------------------
 - As miniaturas do Pool são preparadas durante o upload, em paralelo com limite
   de dois processos de trabalho, usando decodificação reduzida quando o formato
   permite. O arquivo original é mantido intacto.
 - O editor e a prévia da folha usam versões leves (até 1250/1200 px) e WebP no
-  canvas; o PNG de produção e o PDF continuam utilizando o original em alta
-  resolução. A orientação EXIF é respeitada.
+  canvas; o PNG de produção e o PDF utilizam a imagem corrigida em alta resolução.
+  A origem original permanece preservada separadamente. A orientação EXIF é respeitada.
 - As dimensões usadas para a indicação de DPI são lidas dos metadados, sem
   decodificar a imagem inteira em cada troca de miniatura.
 - A seleção múltipla é feita diretamente nas miniaturas do Pool. Marque uma ou
-  mais artes e use o único botão “APLICAR AJUSTES AOS SELECIONADOS”. Ele reutiliza
-  os controles atuais de Ajustes Gerais (Preencher até o corte, Encaixar na área
-  da arte, Desfoque e Cor sólida), sem criar outra seção ou controles duplicados.
+  mais artes e use o botão “APLICAR AJUSTES AOS SELECIONADOS”. Ele aplica os
+  presets de enquadramento, os controles de preenchimento e as correções de
+  iluminação/cor/textura, sem copiar zoom/posição manuais. A remoção de fundo
+  continua individual por arte.
 - Em modo manual, o lote não copia o zoom nem a posição da imagem em foco: cada
   arte continua com seu enquadramento individual. Os presets ativos e as
   propriedades do preenchimento são aplicados aos IDs selecionados.
@@ -154,3 +219,527 @@ ATUALIZACAO DA AREA FOLHA DE IMPRESSAO
   continua incluindo o lote completo.
 - A instrução de impressão 1:1 aparece junto do botão Imprimir PDF, somente
   depois que o PDF estiver pronto.
+
+
+CORRECOES DE INTERFACE E PRESERVACAO DE CONFIGURACOES (V3.21)
+------------------------------------------------------------
+- A navegação do editor foi reorganizada em três áreas (Enquadrar, Luz e cor e
+  Fundo), com a seção de lote separada no cabeçalho.
+- A seção Ajustes em lote continua recolhida logo abaixo do título Ferramentas
+  de edição, sem ocupar uma das três áreas principais.
+- A remoção de um fundo personalizado não escreve mais na chave protegida do
+  st.file_uploader. O seletor é recriado usando uma chave versionada, evitando
+  StreamlitValueAssignmentNotAllowedError.
+- A imagem de fundo passou a ser uma camada independente: não bloqueia presets,
+  zoom, arraste ou reposicionamento da arte principal. Com a borda ativa, a
+  imagem principal é recortada na guia Arte; o fundo ocupa o anel Arte–Corte.
+- Os presets Preencher até o corte e Encaixar na área da arte continuam
+  selecionáveis mesmo com o fundo personalizado ativo. O enquadramento é mantido
+  ao remover a camada de fundo.
+- As configurações de papel, orientação, margem da folha e espaço entre bottons
+  foram reunidas em uma faixa visível acima da prévia, em vez de ficarem em uma
+  coluna estreita ao lado dela.
+- Margens, espaçamento e disposição são lembrados por perfil de papel, tamanho
+  e formato do botton. Alternar entre tamanhos não apaga os valores personalizados
+  definidos anteriormente para cada perfil. Os valores recomendados continuam
+  disponíveis pelo botão Restaurar valores recomendados.
+
+VALIDACAO TECNICA DA REVISAO V3.21
+---------------------------------
+- Compilação sintática Python aprovada.
+- Sintaxe JavaScript do editor verificada com Node.js.
+- Testes de composição Pillow confirmaram a camada de borda entre Arte e Corte,
+  o recorte da imagem principal na guia Arte e a preservação do preenchimento
+  antigo quando não há fundo personalizado.
+- Testes de callback confirmaram que o carregamento do fundo não altera zoom ou
+  posição da arte e que a remoção avança a chave do uploader sem atribuir valor
+  à chave protegida do widget.
+- A interface Streamlit completa não pôde ser iniciada neste ambiente porque a
+  dependência Streamlit não está instalada e não há acesso à internet para
+  instalá-la. A conferência visual final deve ser feita no navegador local.
+
+
+VERSAO 3.22 - AJUSTES IMPORTANTES
+---------------------------------
+- Abas de edição redesenhadas com navegação segmentada e rótulos completos.
+- Valores padrão de margem e espaço entre bottons restaurados pelo algoritmo
+  de recomendação original, individualmente por papel e tamanho.
+- Ajustes manuais da folha continuam sendo lembrados por perfil.
+- Remoção do fundo personalizado usa uma nova chave de upload; não atribui
+  valores diretamente ao estado protegido do seletor de arquivos.
+- Fundo decorativo e enquadramento da arte principal permanecem independentes.
+
+
+CORRECOES V3.22
+--------------
+- A navegação das ferramentas passou a usar o controle segmentado nativo, em
+  vez de botões em colunas. Os rótulos Enquadrar, Luz e cor e Fundo ficam
+  centralizados e têm largura suficiente para não serem cortados.
+- Os padrões de margem externa e distância entre bottons foram restaurados
+  com o algoritmo original do primeiro pacote publicado. O cálculo considera
+  papel, dimensões da folha e tamanho/formato do botton.
+- Na primeira abertura desta revisão, valores genéricos armazenados por versões
+  intermediárias são migrados uma única vez para as recomendações calculadas.
+  Depois disso, valores manuais permanecem lembrados por perfil de folha/botton.
+- A remoção do fundo decorativo usa chave versionada para o seletor de arquivo,
+  e o enquadramento da arte principal continua independente dessa camada.
+
+
+VERSAO 3.23 - NAVEGACAO E REMOCAO DE FUNDO
+------------------------------------------
+- A sessao PREVIA DE AJUSTE agora tem setas no canto superior direito para
+  editar a arte anterior ou a proxima na ordem atual do Pool. A primeira e a
+  ultima arte desativam a seta correspondente. O zoom e a posicao sao salvos
+  antes da troca e cada arte continua com seus ajustes individuais.
+- O comando Remover imagem de fundo foi refeito para limpar a camada no fluxo
+  principal, atualizar a chave do seletor e recriar o uploader em um novo rerun.
+  Ele remove apenas a borda decorativa e nao altera o enquadramento da arte.
+- AJUSTES EM LOTE recebeu destaque em gradiente ciano, magenta e amarelo, com
+  rótulo reforcado e quantidade de artes marcadas mais evidente.
+
+
+VERSAO 3.24 - REMOCAO DEFINITIVA DO FUNDO E NAVEGACAO DESTACADA
+----------------------------------------------------------------
+- A remocao da imagem de fundo agora invalida explicitamente a camada no
+  registro da arte e no canvas do navegador. O componente substitui o objeto
+  de imagem em memoria em vez de atribuir uma URL vazia, evitando que uma
+  imagem antiga ou um carregamento atrasado volte a aparecer.
+- A remocao preserva zoom, deslocamento, enquadramento e ajustes da arte
+  principal, e a composicao volta ao modo de preenchimento que estava ativo
+  antes da camada decorativa. A mesma limpeza e refletida no PNG e na folha.
+- Os comandos de navegacao da PREVIA DE AJUSTE agora exibem texto e setas
+  (ANTERIOR / PROXIMA), com botoes maiores, cores contrastantes e estados
+  desabilitados mais claros nos extremos do Pool.
+- AJUSTES EM LOTE abre automaticamente quando duas ou mais artes estao
+  selecionadas no Pool, e o titulo mostra a quantidade marcada.
+
+
+VERSAO 3.25 - ESTADO UNICO DO FUNDO E AJUSTES EM LOTE SELETIVOS
+-----------------------------------------------------------------
+- A imagem de fundo decorativa agora possui um estado explicito de ativacao.
+  A remocao desativa a camada, limpa bytes, digest e nome e invalida as
+  exportacoes anteriormente preparadas.
+- A mesma verificacao de estado e utilizada pela sessao Fundo, previsualizacao
+  do editor, PNG individual, previsualizacao da folha e PDF. Bytes residuais
+  de sessoes antigas nao sao mais tratados como uma camada ativa.
+- A secao Ajustes em lote agora permite escolher os grupos a copiar:
+  Enquadramento; Luz e cor; e Fundo.
+- A arte exibida na Previa de ajuste e a origem das configuracoes. Os grupos
+  marcados sao aplicados somente as outras artes selecionadas no Pool; a arte
+  de origem nao e regravada.
+- Enquadramento copia preset, zoom e posicao manual. Luz e cor copia balanco
+  de brancos, exposicao, contraste, saturacao, matiz e nitidez. Fundo copia
+  preenchimento, imagem decorativa e estado da remocao automatica por IA.
+- Por seguranca, o grupo Fundo inicia desmarcado. Se a arte de origem nao tiver
+  imagem decorativa, aplicar esse grupo tambem remove a camada dos destinos.
+
+VALIDACAO TECNICA V3.25
+----------------------
+- Compilacao Python aprovada com py_compile.
+- Testes isolados confirmaram que o estado inativo impede que bytes residuais
+  aparecam na sessao Fundo ou sejam passados as rotinas de previsualizacao e
+  exportacao.
+- Testes de remocao verificaram a limpeza do registro da arte, incremento das
+  revisoes do uploader e invalidação de PNG/PDF previamente preparados.
+- Testes de aplicacao em lote cobriram cada grupo separadamente, combinacoes,
+  copia de fundo personalizado, estado de remocao por IA e exclusao da propria
+  arte de origem da lista de destinos.
+- A interface Streamlit completa nao foi iniciada neste ambiente; o clique real
+  e a conferência da folha/PDF devem ser feitos na maquina de execucao.
+
+
+VERSAO 3.26 - AJUSTES EM LOTE POR PARAMETRO E FUNDO & BORDA
+--------------------------------------------------------------
+- Cada ajuste pode ser selecionado individualmente na aplicação em lote:
+  preencher até o corte, encaixar na área da arte, zoom, posição horizontal,
+  posição vertical, temperatura, matiz do branco, exposição, contraste,
+  saturação, matiz de cor, nitidez, tipo de preenchimento, cor, desfoque e
+  imagem de borda personalizada.
+- A remoção de fundo por IA possui caixa própria, separada do preenchimento e
+  da imagem de borda. Se não for marcada, o estado de recorte por IA dos
+  destinos não é alterado e nenhuma inferência é iniciada por essa operação.
+- A sessão do editor foi renomeada para FUNDO & BORDA. O preenchimento das
+  áreas vazias (cor sólida ou imagem desfocada), cor de base e intensidade do
+  desfoque foram movidos para essa sessão.
+- A aplicação em lote mostra barra de progresso percentual e identifica a
+  arte que está sendo processada. O percentual representa a fração de artes
+  concluídas; o modelo U²-Net não disponibiliza progresso interno por imagem.
+- Os destinos preservam todos os parâmetros que não foram marcados. A imagem
+  em foco continua sendo apenas a origem e nunca é sobrescrita como destino.
+- Os parâmetros começam desmarcados para evitar cópias acidentais. O comando
+  Selecionar ajustes (sem IA) marca todos os parâmetros comuns; a caixa de IA
+  permanece desmarcada e exige seleção deliberada. Limpar seleção desmarca tudo.
+
+VALIDACAO TECNICA V3.26
+----------------------
+- Compilacao Python aprovada com py_compile.
+- Teste isolado da rotina de lote confirmou cópia exclusiva dos parâmetros
+  marcados, preservação de parâmetros não marcados, exclusão da origem e
+  atualização de progresso por arte.
+- Testes adicionais cobriram a independência entre borda personalizada e
+  remoção por IA, além da cópia isolada de posição horizontal.
+- A interface Streamlit completa não foi iniciada neste ambiente; o fluxo
+  visual e a inferência real do U²-Net devem ser conferidos localmente.
+
+
+VERSAO 3.27 - AJUSTES EM LOTE SIMPLIFICADOS
+-----------------------------------------
+- A aplicacao em lote agora apresenta somente quatro opcoes: Imagem de borda
+  personalizada; Enquadramento; Preenchimento das areas vazias; e Remocao de
+  fundo por IA.
+- A opcao de Enquadramento mostra dinamicamente o modo ativo da arte em foco:
+  Preencher ate o corte, Encaixar na area da arte ou Enquadramento livre. Ao
+  aplicar, copia esse modo como um conjunto, incluindo zoom e posicao manual.
+- Preenchimento das areas vazias mostra o modo ativo (Cor solida ou Imagem
+  desfocada) e copia tambem a cor e a intensidade do desfoque.
+- Imagem de borda personalizada copia a camada ativa da origem; quando a origem
+  nao possui uma camada ativa, a camada personalizada dos destinos e desativada.
+- Remocao de fundo por IA continua independente. Se nao for marcada, a
+  configuracao de IA dos destinos permanece inalterada. Quando marcada, a
+  configuracao da origem e replicada e o processamento e feito por arte.
+- Foram removidos os controles de selecao de parametros individuais, o resumo
+  extenso e os comandos de marcar/limpar todos. A sessao fica limitada as quatro
+  decisoes solicitadas.
+
+VALIDACAO TECNICA V3.27
+-----------------------
+- Compilacao Python aprovada com py_compile.
+- Testes isolados das quatro opcoes: enquadramento por preset, enquadramento
+  livre com zoom e deslocamentos, preenchimento em cor solida/desfoque, imagem
+  de borda personalizada e remocao de fundo por IA.
+- Verificado que opcoes nao marcadas preservam os respectivos dados nos destinos
+  e que somente a opcao de IA aciona o processamento da imagem.
+- A interface Streamlit completa nao foi executada neste ambiente; a validacao
+  visual dos quatro controles e o clique real de aplicacao devem ser conferidos
+  no computador de execucao.
+
+
+VERSAO 3.28 - FUNDO CONDICIONAL E REMOCAO POR IA INDEPENDENTE
+----------------------------------------------------------------
+- O painel de replicacao em lote agora exibe uma opcao de fundo contextual.
+  Quando a arte em foco tem uma arte de fundo personalizada ativa, aparece
+  somente a caixa "Replicar arte de fundo". Quando nao tem, essa caixa e
+  substituida por "Tipo de preenchimento", que replica o modo ativo (cor solida
+  ou imagem desfocada), a cor e a intensidade do desfoque.
+- A aplicacao de "Replicar arte de fundo" nao altera o tipo de preenchimento
+  dos destinos. A aplicacao de "Tipo de preenchimento" preserva uma arte de
+  fundo personalizada que ja exista em cada destino.
+- A remocao de fundo por IA foi retirada das caixas de replicacao e passou a
+  ser uma acao independente, com botao proprio: "Remover fundo por IA nas
+  artes selecionadas". A acao processa cada arte de destino sobre o proprio
+  original, sem depender do estado de remocao da arte em foco e sem modificar
+  a arte em foco. Os demais ajustes individuais de cada destino sao mantidos.
+- A aplicacao das configuracoes em lote mostra porcentagem de artes concluidas
+  e identifica a etapa e o arquivo em processamento.
+- A remocao por IA individual e em lote mostra progresso por etapas: preparacao,
+  carregamento do modelo U2-Net, inferencia e finalizacao. Durante a inferencia,
+  o rembg/U2-Net nao fornece um callback de percentual interno; o indicador
+  mantem a etapa atual visivel e avanca quando o processamento retorna. Na
+  remocao em lote, a porcentagem geral tambem considera as artes concluidas.
+
+VALIDACAO TECNICA V3.28
+----------------------
+- Compilacao Python aprovada com py_compile.
+- Testes isolados confirmaram que a disponibilidade da opcao de fundo e
+  condicionada ao estado da arte em foco, que a replicacao da arte de fundo
+  nao altera cor/desfoque e que o tipo de preenchimento preserva as camadas
+  personalizadas ja existentes nos destinos.
+- Teste de remocao por IA em lote confirmou que a acao independe do estado de
+  IA da arte em foco, exclui a origem, preserva os demais ajustes dos destinos
+  e publica atualizacoes percentuais por etapa/arquivo.
+- Teste de remocao individual confirmou os estados de progresso (4, 16, 92 e
+  100 por cento) e a preservacao do arquivo original.
+- A interface Streamlit completa e a inferencia real do U2-Net nao foram
+  executadas neste ambiente. A apresentacao visual e o tempo real de inferencia
+  devem ser conferidos na maquina de execucao.
+
+VERSAO 3.30 - AJUSTES EM LOTE COM OPCOES INDEPENDENTES
+------------------------------------------------------
+O painel de Ajustes em Lote agora permite escolher separadamente:
+- Preencher ate o corte;
+- Encaixar na area da arte;
+- Aplicar desfoque, com controle de intensidade;
+- Aplicar cor solida, com seletor de cores;
+- Remover fundo com IA, como operacao independente e com progresso;
+- Fundo personalizado, com upload e previa.
+
+As duas opcoes de enquadramento sao mutuamente exclusivas, assim como desfoque e cor solida, pois cada par define dois modos alternativos para a mesma propriedade. Fundo personalizado pode ser combinado com enquadramento e preenchimento.
+Todas as operacoes atuam nas artes marcadas no Pool, inclusive a arte em foco quando estiver selecionada.
+
+VALIDACAO TECNICA V3.30
+-----------------------
+- Compilacao Python aprovada.
+- Testes isolados dos parametros e callbacks de progresso aprovados.
+- A interface completa do Streamlit nao foi iniciada neste ambiente; a validacao visual final deve ser feita ao abrir o aplicativo localmente.
+
+
+PRIORIDADE ENTRE ENQUADRAMENTO E FUNDOS - V3.32
+------------------------------------------------
+- Preencher até o corte é incompatível com qualquer camada de fundo. Ao
+  ativar esse modo no ajuste em lote, o aplicativo desmarca Encaixar na área
+  da arte, desfoque, cor sólida e Fundo Personalizado. Na aplicação, também
+  desativa e limpa eventuais camadas personalizadas já existentes nos destinos.
+- Encaixar na área da arte pode coexistir com desfoque, cor sólida ou Fundo
+  Personalizado, pois mantém visível a região entre as guias Arte e Corte.
+- Desfoque e cor sólida são mutuamente exclusivos. Ativar um desmarca o outro
+  e desativa Fundo Personalizado. Ambos selecionam automaticamente Encaixar
+  na área da arte para que o preenchimento seja visível.
+- Fundo Personalizado substitui desfoque e cor sólida. Ao ativá-lo, essas
+  opções são desmarcadas e Encaixar na área da arte é selecionado.
+- Desmarcar Encaixar na área da arte também desativa os modos de fundo que
+  dependem dessa região.
+- Uma normalização de sessão corrige combinações incompatíveis guardadas por
+  versões anteriores. A regra é aplicada tanto na interface quanto na rotina
+  de aplicação, protegendo os resultados mesmo se uma sessão antiga mantiver
+  estados conflitantes.
+- O upload de fundo personalizado recebe uma nova chave quando é desativado
+  por prioridade, para evitar que um arquivo anterior reapareça.
+
+VALIDACAO V3.32
+--------------
+- Compilação Python e integridade do pacote verificadas.
+- Testes de transição das opções: Corte desativa todos os fundos; Desfoque
+  desativa Cor/Fundo Personalizado e ativa Área da Arte; Cor faz o inverso;
+  Fundo Personalizado desativa Desfoque/Cor e ativa Área da Arte; Área da Arte
+  isolada permanece compatível com fundo personalizado.
+- Testes da rotina de aplicação confirmam a limpeza de camadas conflitantes
+  nos destinos e a preservação das camadas quando apenas Área da Arte é aplicada.
+- A interface completa do Streamlit e a inferência U²-Net não foram executadas
+  neste ambiente; validar visualmente no navegador e testar a operação no
+  computador onde o aplicativo será utilizado.
+
+
+EDICAO INDIVIDUAL E SELETOR NATIVO DE COR - V3.32
+-------------------------------------------------
+- A edição individual segue as mesmas prioridades do Ajuste em Lote: Preencher
+  até o corte remove fundos decorativos e retorna ao preenchimento sólido neutro;
+  Desfoque, Cor sólida ou Fundo personalizado selecionam Encaixar na área da arte.
+- Cor de base é exclusiva do modo Imagem desfocada; Cor de fundo é exclusiva do
+  modo Cor sólida. Os dois valores ficam salvos separadamente por arte.
+- O seletor de cor foi simplificado para um único controle nativo do navegador,
+  sem botão de conta-gotas separado. No Chrome/Edge desktop, o seletor nativo
+  inclui conta-gotas na própria janela de escolha de cor (requer navegador Chromium
+  compatível); em outros navegadores a interface é fornecida pelo próprio browser.
+
+
+EDICAO DA SESSAO FUNDO & BORDA - V3.33
+--------------------------------------
+- O modo de preenchimento individual apresenta sempre tres opcoes: Cor solida,
+  Imagem desfocada e Fundo personalizado.
+- Os controles especificos aparecem somente para a opcao selecionada.
+- Cor solida exibe apenas sua paleta de cor. Imagem desfocada exibe a intensidade
+  do desfoque e a paleta Cor de base do desfoque. Fundo personalizado exibe o
+  upload, a previa da imagem ativa e o comando de remocao/substituicao.
+- O upload so aparece depois que Fundo personalizado e selecionado. A opcao
+  pode ser selecionada antes do upload e permanece ativa enquanto o usuario
+  escolhe o arquivo.
+- Ao sair de Fundo personalizado para Cor solida ou Imagem desfocada, a camada
+  personalizada (se houver) e removida e o modo escolhido assume prioridade.
+- Ao remover manualmente a imagem, o modo de preenchimento usado antes da
+  ativacao de Fundo personalizado e restaurado.
+- Cor solida (campo `background`) e Cor de base do desfoque
+  (`blur_base_color`) continuam independentes e salvas por arte.
+- Fundo personalizado e os preenchimentos continuam ativando automaticamente
+  Encaixar na area da arte, mantendo a arte principal enquadravel e a borda visivel.
+
+
+PRESERVACAO DO ENQUADRAMENTO MANUAL E ROTULOS - V3.34
+-------------------------------------------------------
+- Os controles da edicao individual foram simplificados: Cor solida mostra
+  somente o texto "Selecione a cor:" antes do seletor; Imagem desfocada mostra
+  somente Intensidade de desfoque e Cor de base, sem repetir o titulo do modo.
+- Ativar Cor solida, Imagem desfocada ou Fundo personalizado nao descarta um
+  zoom ou posicionamento manual ja feito pelo usuario.
+- Quando uma composicao manual estava baseada na guia Corte, a transicao para
+  um preenchimento que precisa mostrar a borda converte apenas a escala relativa
+  da guia para a Arte, preservando o tamanho fisico e os deslocamentos X/Y.
+- Quando a composicao manual ja estava baseada na guia Arte, escala e posicao
+  permanecem exatamente como estavam.
+- Os presets explicitamente escolhidos pelo usuario continuam aplicando seu
+  enquadramento padrao; a preservacao vale para a troca de modo de preenchimento.
+- Ao carregar Fundo personalizado depois de selecionar a opcao, o upload nao
+  recentra nem redefine a arte principal.
+
+VALIDACAO V3.34
+--------------
+- Compilacao Python aprovada.
+- Testes isolados da transicao manual Corte -> Arte confirmam a preservacao do
+  tamanho fisico e dos deslocamentos; composicoes manuais ja baseadas em Arte
+  permanecem sem alteracoes.
+- Presets nao personalizados continuam encaminhando para Encaixar na area da Arte.
+- A interface completa do Streamlit nao foi iniciada neste ambiente; validar
+  a interacao e a aparencia no navegador local.
+
+
+PRIORIDADE DE PREENCHIMENTO NA EDICAO INDIVIDUAL - V3.35
+---------------------------------------------------------
+- O preset individual "Preencher ate o corte" agora desativa os modos de
+  preenchimento, exatamente como no Ajuste em Lote: cor solida, imagem
+  desfocada e fundo personalizado deixam de estar ativos.
+- Enquanto o preset Corte estiver ativo, os controles de preenchimento ficam
+  ocultos e a sessao Fundo & Borda informa por que estao indisponiveis.
+- Um estado interno "Sem preenchimento" evita que uma cor ou desfoque antigo
+  continue sendo aplicado sob a arte; a base neutra branca e usada nas areas
+  transparentes da imagem.
+- Se havia uma imagem de fundo personalizada, a camada e removida e os dados
+  do uploader sao invalidados.
+- Cor e intensidade do desfoque permanecem guardadas. Ao voltar para
+  "Encaixar na area da arte" ou sair do preset Corte para edicao manual, o
+  ultimo modo de preenchimento valido (Cor solida ou Imagem desfocada) volta
+  a ficar disponivel. Uma imagem personalizada removida nao e reativada.
+- A normalizacao tambem corrige estados conflitantes guardados por sessoes
+  anteriores, para que preview, PNG, folha e PDF usem a mesma composicao.
+
+VALIDACAO V3.35
+--------------
+- Compilacao Python aprovada.
+- Testes isolados de seis transicoes: Corte desativa desfoque; Corte remove
+  fundo personalizado; troca de volta para Arte restaura o tipo de
+  preenchimento; desmarcar Corte libera o modo anterior; estados antigos
+  conflitantes sao normalizados; gesto manual no canvas libera novamente
+  o preenchimento.
+- Verificacao da composicao confirma que "Sem preenchimento" usa fundo
+  neutro na previa individual, PNG e composicao da folha/PDF.
+- A interface completa do Streamlit nao foi iniciada neste ambiente.
+
+
+PARIDADE ENTRE EDICAO INDIVIDUAL E AJUSTE EM LOTE - V3.36
+----------------------------------------------------------
+- Os controles em lote de desfoque e cor solida agora espelham os controles
+  individuais: Desfoque possui Intensidade do desfoque e Cor de base; Cor
+  solida possui o seletor identificado por "Selecione a cor:".
+- As duas cores sao armazenadas separadamente. A cor de base do desfoque nao
+  sobrescreve a cor solida e vice-versa. Ambos usam o seletor integrado com
+  conta-gotas nativo nos navegadores Chromium compativeis.
+- A remocao de Fundo personalizado ao aplicar desfoque/cor respeita a prioridade
+  dos modos e preserva as cores anteriormente configuradas.
+- O preset individual e o ajuste em lote "Preencher ate o corte" suspendem os
+  preenchimentos sem apagar a cor solida, a cor de base ou a intensidade. Ao
+  voltar para a guia Arte ou para o enquadramento livre, o modo anterior pode
+  ser reativado.
+- No lote, selecionar desfoque/cor/fundo personalizado desativa o preset Corte,
+  mas nao força um preset Arte em todas as artes. Cada destino passa a usar a
+  guia Arte quando necessario; transformacoes manuais existentes sao
+  preservadas, enquanto artes ainda no preset Corte mudam para o preset Arte.
+- Desmarcar "Encaixar na area da arte" no lote representa enquadramento
+  livre/manual e nao desativa os preenchimentos selecionados.
+- A mensagem da edicao individual agora informa as tres formas de habilitar
+  preenchimentos: selecionar Encaixar na area da arte, desmarcar Corte para
+  enquadramento livre ou movimentar/redimensionar a imagem manualmente.
+- Removido o titulo duplicado "Fundo personalizado" dentro dos controles do
+  proprio modo; o nome permanece apenas no seletor de modalidade.
+
+VALIDACAO V3.36
+--------------
+- Compilacao Python aprovada.
+- Testes isolados cobrem separacao das duas cores, transicoes Corte/Arte/livre,
+  aplicacao de preenchimentos em imagens com enquadramento manual e limpeza
+  exclusiva de camadas de fundo incompatíveis.
+- A interface completa do Streamlit nao foi iniciada neste ambiente; validar
+  a interacao visual no navegador local.
+
+
+POOL: DIFERENCA ENTRE FOCO E SELECAO EM LOTE - V3.37
+------------------------------------------------------
+- Moldura verde: identifica somente a arte atualmente aberta na previa para
+  edicao individual. Clicar na miniatura altera o foco.
+- Caixa azul: marca ou desmarca a arte como alvo das operacoes em lote e da
+  remocao de fundo por IA. O foco nao marca automaticamente a caixa azul.
+- Para incluir a arte em foco em uma operacao em lote, marque tambem sua caixa
+  azul.
+- Use os controles +/-, ou digite a quantidade, para definir copias por arte.
+  Arraste o icone de alca para alterar a ordem de impressao.
+- Os botoes "Selecionar todas"/"Desselecionar todas" alteram as caixas azuis.
+  "Preencher folha" completa as posicoes restantes usando a arte em foco.
+  "Excluir selecao" remove as artes marcadas; sem marcacoes, o botao oferece
+  excluir todas as artes do Pool.
+
+ENVIO DE IMAGENS PELO SMARTPHONE - V3.37
+-----------------------------------------
+- Abra a sessao 'Enviar imagens pelo smartphone' e gere um QR Code temporario.
+- O computador e o smartphone devem estar na mesma rede Wi-Fi.
+- Leia o QR Code com a camera do celular, selecione ou capture as imagens e
+  envie. Os arquivos recebidos sao acrescentados automaticamente ao Pool.
+- A sessao expira apos 30 minutos sem atividade e aceita ate 50 imagens, com
+  limite de 250 MB por sessao e 100 MB por arquivo.
+- Na primeira conexao, permita o acesso do Python a rede privada caso o
+  Firewall do Windows solicite autorizacao.
+- Encerre a sessao para invalidar o QR Code quando terminar.
+
+
+FLUXO POS-AJUSTE EM LOTE E TELAS MOVEIS - V3.38
+-------------------------------------------------
+- Quando uma aplicacao em lote ou uma remocao por IA termina sem erros, o
+  painel e recolhido e as artes processadas sao desmarcadas no Pool. A moldura
+  verde da arte em foco continua preservada. Se ocorrer erro, a selecao fica
+  marcada para facilitar a conferencia e a repeticao.
+- Em telas touch, o Pool apresenta setas para mover uma arte uma posicao acima
+  ou abaixo, alem da alca de arraste disponivel em dispositivos com suporte.
+- Em tablets e celulares, ferramentas e previa ficam empilhadas; os paineis de
+  configuracao, navegacao, QR Code e controles do Pool adaptam sua distribuicao
+  ao espaco disponivel e usam alvos de toque maiores.
+
+
+RESPONSIVIDADE TOUCH E EDITOR MULTITOQUE - V3.39
+-----------------------------------------------
+- O canvas do editor agora aceita gesto de pinça com dois dedos para aproximar
+  e afastar a imagem. O ponto sob o centro da pinça permanece ancorado, e o
+  movimento do centro dos dedos também desloca a composição naturalmente.
+- Ao soltar um dos dedos depois da pinça, o dedo restante pode continuar
+  arrastando a arte sem interromper o gesto.
+- As alças de redimensionamento aumentam proporcionalmente em telas estreitas;
+  a área de toque das alças foi ampliada sem alterar a escala de produção.
+- Presets, botões, radios, checkboxes, abas e sliders receberam alvos de toque
+  maiores em celulares e tablets. O canvas reserva os gestos de toque para a
+  edição da arte, sem acionar o zoom da página.
+- O cabeçalho foi ajustado para tablets e celulares: o nome da marca e a
+  ilustração do Erlenmeyer se redimensionam dentro da largura disponível,
+  inclusive em telas estreitas.
+- A adaptação de largura evita overflow horizontal nos principais containers.
+
+VALIDACAO V3.39
+--------------
+- Compilação Python e sintaxe JavaScript verificadas.
+- Testes em Chromium de mouse, arraste por um dedo, pinça, pan combinado com
+  pinça e continuação do arraste após soltar um dedo.
+- Verificação de layout em viewports de 360x800, 390x844, 768x1024 e 1024x768.
+- A interface Streamlit completa não pôde ser executada neste ambiente; os
+  componentes de UI do Streamlit precisam de validação final no dispositivo real.
+
+
+MELHORIAS PARA TOUCH, SELECAO E UPLOAD - V3.40
+-------------------------------------------------
+- Os checkboxes usam os parametros oficiais width="stretch" e wrap=True e
+  preservam integralmente a estrutura de toque nativa do Streamlit. As regras
+  CSS antigas que redimensionavam elementos internos (estrutura BaseWeb) foram
+  removidas para evitar que a area clicavel se deslocasse em celulares/tablets.
+- O instalador agora exige Streamlit 1.67.0 ou superior e atualiza ambientes
+  virtuais existentes que ainda estejam em versoes antigas.
+- Os selectboxes de opcoes fixas usam filter_mode=None: continuam sendo listas
+  fechadas, mas deixam de aceitar digitação/filtro e nao devem abrir teclado
+  virtual ao selecionar tamanho, papel, orientacao, resolucao ou pagina.
+- O file_uploader tradicional recebeu chave explicita e versionada para evitar
+  estados de widget obsoletos entre envios.
+- Foi adicionada uma alternativa de upload por HTTP local para celular/tablet.
+  O usuario pode abrir uma pagina de envio no proprio aparelho; ela envia os
+  arquivos diretamente ao servidor local, sem depender do WebSocket do editor.
+  Os arquivos entram automaticamente no Pool pelo monitor de sessao.
+- A pagina alternativa mostra progresso por arquivo, faz novas tentativas
+  automaticas quando a conexao falha e permite reenviar somente os arquivos
+  que nao foram concluidos. Um endpoint de keep-alive renova a sessao enquanto
+  a pagina esta aberta.
+- A sessao Streamlit permanece recuperavel por ate 10 minutos apos uma
+  desconexao temporaria; limites de upload e mensagem foram alinhados.
+- Textos, metricas, opcoes Grade/Hexagonal e legendas da Folha de Impressao
+  recebem quebra de linha responsiva e limites de largura em tablets/celulares.
+
+VALIDACAO V3.40
+--------------
+- Compilacao Python dos modulos do aplicativo e do servidor local aprovada.
+- Sintaxe JavaScript da pagina de upload validada com Node.js.
+- Teste HTTP local: GET da pagina, keep-alive, POST de imagem PNG e recuperacao
+  da imagem pela fila do Pool aprovados.
+- Verificada a presenca de filter_mode=None nos cinco selectboxes fixos e de
+  width="stretch"/wrap=True em todos os checkboxes do aplicativo.
+- A interface completa do Streamlit nao foi executada neste ambiente; validar
+  os widgets nativos, o upload alternativo e a responsividade em aparelhos reais.

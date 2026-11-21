@@ -63,15 +63,17 @@ h1,h2,h3,h4{font-family:"Gochi Hand",cursive !important;font-weight:400 !importa
 /* ---------- cabeçalho da marca ---------- */
 /* O nome e o slogan ficam centralizados; a ilustração acompanha LAB à direita. */
 .brand{display:flex;justify-content:center;align-items:center;width:100%;padding:.15rem 0 .1rem}
-.brand-lockup{display:flex;align-items:center;justify-content:center;gap:.7rem;max-width:100%}
-.brand-copy{min-width:0;text-align:center}
-.brand-name{font-family:"Gochi Hand",cursive !important;font-size:4.15rem;line-height:1.02;
-  letter-spacing:.025em;color:#fff;text-transform:uppercase;white-space:nowrap}
+.brand-lockup{display:flex;align-items:center;justify-content:center;gap:clamp(.35rem,1.1vw,.7rem);
+  width:100%;max-width:100%;min-width:0}
+.brand-copy{flex:1 1 auto;min-width:0;text-align:center}
+.brand-name{font-family:"Gochi Hand",cursive !important;font-size:clamp(2.35rem,4.9vw,4.15rem);line-height:1.02;
+  letter-spacing:.018em;color:#fff;text-transform:uppercase;white-space:nowrap}
 .brand-name .brand-cyan{color:var(--c)}
 .brand-name .brand-magenta{color:var(--m)}
 .brand-name .brand-yellow{color:var(--y)}
 .brand-sub{margin-top:.38rem;color:var(--muted);font-size:1.03rem;letter-spacing:.02em;text-align:center}
-.brand-illustration{display:block;flex:none;width:auto;height:166px;max-width:118px;object-fit:contain;
+.brand-illustration{display:block;flex:0 0 auto;width:auto;height:clamp(112px,13vw,166px);
+  max-width:clamp(78px,9.5vw,118px);object-fit:contain;object-position:center;
   filter:drop-shadow(0 5px 12px rgba(0,0,0,.28))}
 .brand-rule{height:3px;border-radius:3px;margin:.8rem 0 1.5rem;opacity:.9;
   background:linear-gradient(90deg,var(--c),var(--m),var(--y))}
@@ -88,11 +90,24 @@ h1,h2,h3,h4{font-family:"Gochi Hand",cursive !important;font-weight:400 !importa
          drop-shadow(0 0 1.8px rgba(255,255,255,.42))
          drop-shadow(0 7px 18px rgba(0,0,0,.30))}
 
+@media(max-width:1024px){
+  .brand-lockup{gap:clamp(.2rem,.8vw,.5rem)}
+  .brand-name{font-size:clamp(2.05rem,5.1vw,3.35rem);letter-spacing:.005em}
+  .brand-illustration{height:clamp(96px,13vw,138px);max-width:clamp(68px,9vw,96px)}
+}
 @media(max-width:700px){
-  .brand-lockup{gap:.25rem}
-  .brand-name{font-size:clamp(1.45rem,6.1vw,2.6rem)}
-  .brand-sub{font-size:clamp(.68rem,2.2vw,.9rem);margin-top:.28rem}
-  .brand-illustration{height:clamp(88px,23vw,130px);max-width:clamp(58px,17vw,90px)}
+  .brand{padding:.1rem 0}
+  .brand-lockup{display:grid;grid-template-columns:minmax(0,1fr) auto;align-items:center;gap:clamp(.15rem,1vw,.35rem)}
+  .brand-copy{width:100%;}
+  .brand-name{font-size:clamp(1.12rem,5.8vw,2.25rem);letter-spacing:0;line-height:1.08}
+  .brand-sub{font-size:clamp(.62rem,2.35vw,.86rem);line-height:1.25;margin-top:.25rem;padding-inline:.1rem}
+  .brand-illustration{height:clamp(68px,18vw,108px);max-width:clamp(44px,14vw,76px);width:auto;}
+}
+@media(max-width:380px){
+  .brand-lockup{gap:.12rem}
+  .brand-name{font-size:clamp(1.02rem,5.25vw,1.28rem);letter-spacing:-.015em}
+  .brand-sub{font-size:.62rem;}
+  .brand-illustration{height:70px;max-width:47px}
 }
 
 /* ---------- títulos de seção ---------- */
@@ -121,11 +136,60 @@ h1,h2,h3,h4{font-family:"Gochi Hand",cursive !important;font-weight:400 !importa
 .lg i{margin-left:auto;font-style:normal;color:var(--muted);font-variant-numeric:tabular-nums}
 .lg-sw{width:1.05rem;height:1.05rem;border-radius:50%;border-width:2px;flex:none}
 
-/* ---------- cartões ---------- */
-.st-key-card_left,.st-key-card_right{background:var(--panel);border:1px solid var(--line);
-  border-radius:20px;padding:1.5rem 1.5rem 1.3rem;box-shadow:0 14px 40px rgba(0,0,0,.35)}
-[data-testid="stImage"] img{border-radius:12px}
+/* ---------- cartões e estação de edição ---------- */
+.st-key-card_left,.st-key-card_right,.st-key-card_preview{background:var(--panel);border:1px solid var(--line);
+  border-radius:20px;padding:1.25rem 1.25rem 1.1rem;box-shadow:0 14px 40px rgba(0,0,0,.30);min-width:0}
+/* A coluna de ferramentas rola por conta própria. A prévia ao lado permanece
+   parada e visível enquanto o usuário percorre os controles. */
+.st-key-card_left{position:sticky;top:.75rem;max-height:calc(100vh - 1.5rem);overflow-y:auto;
+  overflow-x:hidden;overscroll-behavior:contain;scrollbar-width:thin;scrollbar-color:#426488 transparent}
+.st-key-card_left::-webkit-scrollbar{width:8px}
+.st-key-card_left::-webkit-scrollbar-thumb{background:#426488;border:2px solid transparent;border-radius:10px;background-clip:padding-box}
+.st-key-card_left .sec{margin-bottom:.7rem}
+.st-key-artwork_editor_tool_section{width:100%;margin-top:.25rem}
+.st-key-artwork_editor_tool_section [data-testid="stSegmentedControl"]{width:100%}
+.st-key-artwork_editor_tool_section [role="radiogroup"]{width:100%;display:grid;
+  grid-template-columns:repeat(4,minmax(0,1fr));gap:.18rem}
+.st-key-artwork_editor_tool_section [role="radio"]{min-width:0;padding:.5rem .2rem;
+  font-size:.8rem;font-weight:700;white-space:normal;text-align:center}
+.st-key-card_left [data-testid="stVerticalBlock"]{gap:.72rem}
+.st-key-card_left [data-testid="stCaptionContainer"] p{line-height:1.45}
+.st-key-card_preview{min-width:0}
+.st-key-card_preview .sec{margin-bottom:.85rem}
+.st-key-card_preview [data-testid="stElementContainer"]{min-width:0}
 .st-key-card_right [data-testid="stImage"] img{box-shadow:0 12px 34px rgba(0,0,0,.55)}
+[data-testid="stImage"] img{border-radius:12px}
+
+/* Legenda da prévia em uma faixa horizontal, sem consumir uma coluna inteira. */
+.guide-compact-legend{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:.5rem;
+  margin:.65rem 0 .2rem;padding:.7rem .8rem;border:1px solid var(--line);border-radius:13px;
+  background:rgba(8,20,36,.52);min-width:0}
+.guide-compact-item{display:grid;grid-template-columns:25px minmax(0,1fr);gap:.1rem .45rem;align-items:center;min-width:0}
+.guide-compact-line{display:block;width:23px;height:0;border-top-width:3px;grid-row:1 / span 2}
+.guide-compact-label{font-size:.82rem;font-weight:800;color:#F2F6FB;line-height:1.1}
+.guide-compact-description{font-size:.67rem;color:var(--muted);line-height:1.25;overflow-wrap:anywhere}
+
+/* Os rótulos dos botões quebram em mais de uma linha quando necessário.
+   Isso evita texto truncado em telas menores ou em colunas estreitas. */
+[data-testid="stButton"] button,[data-testid="stDownloadButton"] button,
+[data-testid="stFormSubmitButton"] button{height:auto !important;min-height:2.55rem;white-space:normal !important;
+  overflow:visible;padding:.55rem .75rem;min-width:0}
+[data-testid="stButton"] button [data-testid="stMarkdownContainer"],
+[data-testid="stDownloadButton"] button [data-testid="stMarkdownContainer"],
+[data-testid="stFormSubmitButton"] button [data-testid="stMarkdownContainer"]{width:100%;min-width:0;white-space:normal !important}
+[data-testid="stButton"] button [data-testid="stMarkdownContainer"] p,
+[data-testid="stDownloadButton"] button [data-testid="stMarkdownContainer"] p,
+[data-testid="stFormSubmitButton"] button [data-testid="stMarkdownContainer"] p{margin:0;white-space:normal !important;
+  overflow-wrap:anywhere;word-break:normal;line-height:1.22;text-align:center}
+@media(max-width:900px){
+  .st-key-card_left{position:relative;top:auto;max-height:none;overflow:visible}
+  .guide-compact-legend{grid-template-columns:repeat(2,minmax(0,1fr))}
+}
+@media(max-width:560px){
+  .st-key-card_left,.st-key-card_right,.st-key-card_preview{padding:.9rem;border-radius:15px}
+  .st-key-artwork_editor_tool_section [role="radio"]{font-size:.73rem;padding-inline:.15rem}
+  .guide-compact-description{font-size:.63rem}
+}
 
 /* ---------- widgets ---------- */
 [data-testid="stFileUploaderDropzone"]{border:2px dashed var(--c);background:rgba(27,169,216,.07);

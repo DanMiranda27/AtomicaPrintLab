@@ -1,5 +1,5 @@
 """
-Atômica Print Lab · Criar Bottons (Streamlit) v3.16
+Atômica Print Lab · Criar Bottons (Streamlit) v3.42
 
 Guias (do centro para fora):
     Segurança  → textos / informações importantes devem ficar dentro dela
@@ -18,6 +18,7 @@ import base64
 import hashlib
 import io
 import math
+import re
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -125,6 +126,132 @@ PAPERS: dict[str, tuple[float, float]] = {
 
 MAX_SOURCE_PX = 4000  # lado maior da imagem usada (evita PDFs gigantes)
 PDF_MAX_DPI = 600
+
+# Valores neutros do painel de correção; cada arte mantém seu próprio estado.
+IMAGE_ADJUSTMENT_DEFAULTS = {
+    "white_balance_temperature": 0,  # negativo = frio; positivo = quente
+    "white_balance_tint": 0,          # negativo = verde; positivo = magenta
+    "exposure": 0.0,                 # EV
+    "contrast": 100,                 # percentual
+    "saturation": 100,               # percentual
+    "hue": 0,                        # graus
+    "sharpness": 100,                # percentual
+    "remove_background": False,
+}
+IMAGE_ADJUSTMENT_FIELDS = tuple(IMAGE_ADJUSTMENT_DEFAULTS)
+
+# Ajustes em lote: operações independentes, definidas diretamente no painel.
+# Os pares enquadramento e preenchimento são mutuamente exclusivos por natureza;
+# as demais operações podem ser combinadas livremente.
+BATCH_FRAMING_OPTIONS = {
+    "cut": "Preencher até o corte",
+    "art": "Encaixar na área da arte",
+}
+BATCH_FILL_OPTIONS = {
+    "blur": "Aplicar desfoque",
+    "color": "Aplicar cor sólida",
+}
+BATCH_BLUR_DEFAULT = 0.5
+BATCH_BACKGROUND_DEFAULT = "#FFFFFF"
+
+
+def _batch_deactivate_custom_background(state) -> None:
+    """Desativa a imagem de fundo do lote e invalida o uploader anterior."""
+    was_active = bool(state.get("batch_apply_custom_background", False))
+    state["batch_apply_custom_background"] = False
+    if was_active:
+        state["batch_custom_background_upload_revision"] = int(
+            state.get("batch_custom_background_upload_revision", 0) or 0
+        ) + 1
+
+
+def _apply_batch_priority_rules(state, active_key: str) -> None:
+    """Resolve opções incompatíveis conforme a última escolha do usuário.
+
+    Regras:
+    - Preencher até o corte não admite desfoque, cor-base nem fundo personalizado.
+    - Desfoque, cor sólida e fundo personalizado são alternativas entre si.
+    - Qualquer preenchimento/fundo exige que a arte seja recortada pela guia
+      Arte; o editor ativa esse recorte por arte, preservando enquadramentos livres.
+    - Encaixar na área da arte pode coexistir com qualquer um dos três fundos.
+    - Desmarcar os dois presets equivale ao enquadramento livre/manual.
+    """
+    active = bool(state.get(active_key, False))
+
+    if active_key == "batch_apply_framing_cut" and active:
+        state["batch_apply_framing_art"] = False
+        state["batch_apply_blur"] = False
+        state["batch_apply_solid_color"] = False
+        _batch_deactivate_custom_background(state)
+        return
+
+    if active_key == "batch_apply_framing_art":
+        if active:
+            state["batch_apply_framing_cut"] = False
+        # Desmarcar os dois presets representa enquadramento livre/manual.
+        # Como na edição individual, isso NÃO desativa preenchimentos ativos.
+        return
+
+    if active_key == "batch_apply_blur" and active:
+        state["batch_apply_solid_color"] = False
+        _batch_deactivate_custom_background(state)
+        state["batch_apply_framing_cut"] = False
+        # A ausência de preset explícito equivale ao enquadramento livre. Cada
+        # arte selecionada será migrada para a guia Arte preservando seu modo manual.
+        return
+
+    if active_key == "batch_apply_solid_color" and active:
+        state["batch_apply_blur"] = False
+        _batch_deactivate_custom_background(state)
+        state["batch_apply_framing_cut"] = False
+        return
+
+    if active_key == "batch_apply_custom_background" and active:
+        state["batch_apply_blur"] = False
+        state["batch_apply_solid_color"] = False
+        state["batch_apply_framing_cut"] = False
+        return
+
+
+def _normalise_batch_priority_state(state) -> None:
+    """Migra combinações antigas para um conjunto coerente de opções."""
+    if bool(state.get("batch_apply_framing_cut", False)):
+        _apply_batch_priority_rules(state, "batch_apply_framing_cut")
+    elif bool(state.get("batch_apply_custom_background", False)):
+        _apply_batch_priority_rules(state, "batch_apply_custom_background")
+    elif bool(state.get("batch_apply_blur", False)):
+        _apply_batch_priority_rules(state, "batch_apply_blur")
+    elif bool(state.get("batch_apply_solid_color", False)):
+        _apply_batch_priority_rules(state, "batch_apply_solid_color")
+    elif bool(state.get("batch_apply_framing_art", False)):
+        _apply_batch_priority_rules(state, "batch_apply_framing_art")
+
+
+def _batch_framing_cut_changed() -> None:
+    _apply_batch_priority_rules(st.session_state, "batch_apply_framing_cut")
+
+
+def _batch_framing_art_changed() -> None:
+    _apply_batch_priority_rules(st.session_state, "batch_apply_framing_art")
+
+
+def _batch_fill_blur_changed() -> None:
+    _apply_batch_priority_rules(st.session_state, "batch_apply_blur")
+
+
+def _batch_fill_color_changed() -> None:
+    _apply_batch_priority_rules(st.session_state, "batch_apply_solid_color")
+
+
+def _batch_custom_background_checkbox_changed() -> None:
+    """Aplica prioridade do fundo personalizado ou limpa o uploader desativado."""
+    _apply_batch_priority_rules(st.session_state, "batch_apply_custom_background")
+    if not bool(st.session_state.get("batch_apply_custom_background", False)):
+        # A revisão muda também quando a desativação veio de uma regra de
+        # prioridade, garantindo que o próximo upload comece vazio.
+        st.session_state["batch_custom_background_upload_revision"] = int(
+            st.session_state.get("batch_custom_background_upload_revision", 0) or 0
+        ) + 1
 
 # ----------------------------------------------------------------------------
 # Geometria
@@ -785,6 +912,183 @@ def prepare_uploaded_artwork(file_name: str, image_bytes: bytes, size: int = 96)
     return digest, _encode_pool_thumbnail(image_bytes, size)
 
 
+@st.cache_resource(show_spinner=False)
+def _get_background_removal_session():
+    """Carrega uma única sessão U²-Net por processo; o modelo é baixado no primeiro uso."""
+    from rembg import new_session
+    return new_session("u2net")
+
+
+@st.cache_data(show_spinner=False, max_entries=16, hash_funcs={bytes: lambda _value: 0})
+def _process_artwork_image_cached(
+    source_digest: str, source_bytes: bytes, remove_background: bool,
+    white_balance_temperature: int, white_balance_tint: int, exposure: float,
+    contrast: int, saturation: int, hue: int, sharpness: int,
+) -> bytes:
+    """Aplica remoção de fundo e correções não destrutivas sempre sobre a origem."""
+    neutral = (
+        not remove_background
+        and int(white_balance_temperature) == 0
+        and int(white_balance_tint) == 0
+        and abs(float(exposure)) < 1e-9
+        and int(contrast) == 100
+        and int(saturation) == 100
+        and int(hue) == 0
+        and int(sharpness) == 100
+    )
+    if neutral:
+        return source_bytes
+
+    with Image.open(io.BytesIO(source_bytes)) as opened:
+        rgba = ImageOps.exif_transpose(opened).convert("RGBA")
+    longest = max(rgba.size)
+    if longest > MAX_SOURCE_PX:
+        factor = MAX_SOURCE_PX / longest
+        rgba = rgba.resize((max(1, round(rgba.width * factor)), max(1, round(rgba.height * factor))), Image.Resampling.LANCZOS)
+
+    if remove_background:
+        # Importação tardia: a aplicação continua abrindo mesmo antes da instalação
+        # opcional do modelo. O iniciar.bat instala o backend CPU automaticamente.
+        from rembg import remove
+        result = remove(
+            rgba, session=_get_background_removal_session(), decontaminate=True
+        )
+        if isinstance(result, bytes):
+            with Image.open(io.BytesIO(result)) as opened_result:
+                rgba = opened_result.convert("RGBA")
+        else:
+            rgba = result.convert("RGBA")
+
+    alpha = rgba.getchannel("A")
+    rgb = rgba.convert("RGB")
+
+    # Balanço de branco por ganho de canais, mantendo os detalhes e o alfa.
+    temperature = max(-100, min(100, int(white_balance_temperature))) / 100.0
+    tint = max(-100, min(100, int(white_balance_tint))) / 100.0
+    gains = (
+        (1.0 + 0.28 * temperature) * (1.0 + 0.12 * tint),
+        1.0 - 0.16 * tint,
+        (1.0 - 0.28 * temperature) * (1.0 + 0.12 * tint),
+    )
+    if any(abs(gain - 1.0) > 1e-9 for gain in gains):
+        channels = rgb.split()
+        corrected = []
+        for channel, gain in zip(channels, gains):
+            lut = [max(0, min(255, round(value * gain))) for value in range(256)]
+            corrected.append(channel.point(lut))
+        rgb = Image.merge("RGB", tuple(corrected))
+
+    # Iluminação/exposição em pontos EV, contraste e intensidade de cor.
+    from PIL import ImageEnhance
+    exposure_factor = 2.0 ** max(-2.0, min(2.0, float(exposure)))
+    if abs(exposure_factor - 1.0) > 1e-9:
+        rgb = ImageEnhance.Brightness(rgb).enhance(exposure_factor)
+    contrast_factor = max(0.0, min(2.0, int(contrast) / 100.0))
+    if abs(contrast_factor - 1.0) > 1e-9:
+        rgb = ImageEnhance.Contrast(rgb).enhance(contrast_factor)
+    saturation_factor = max(0.0, min(2.0, int(saturation) / 100.0))
+    if abs(saturation_factor - 1.0) > 1e-9:
+        rgb = ImageEnhance.Color(rgb).enhance(saturation_factor)
+
+    hue_shift = max(-180, min(180, int(hue)))
+    if hue_shift:
+        hsv = rgb.convert("HSV")
+        h, sat, val = hsv.split()
+        shift = round(hue_shift * 255 / 360)
+        h = h.point(lambda value: (value + shift) % 256)
+        rgb = Image.merge("HSV", (h, sat, val)).convert("RGB")
+
+    sharpness_factor = max(0.0, min(2.0, int(sharpness) / 100.0))
+    if abs(sharpness_factor - 1.0) > 1e-9:
+        rgb = ImageEnhance.Sharpness(rgb).enhance(sharpness_factor)
+
+    corrected_rgba = Image.merge("RGBA", (*rgb.split(), alpha))
+    buffer = io.BytesIO()
+    corrected_rgba.save(buffer, format="PNG", optimize=True)
+    return buffer.getvalue()
+
+
+def _sync_processed_artwork(item: dict, progress_callback=None) -> None:
+    """Atualiza a arte a partir do original e sinaliza as etapas demoradas da IA."""
+    original = item.get("original_image")
+    if not isinstance(original, bytes) or not original:
+        # Migração transparente de itens já existentes nesta compilação.
+        original = item.get("image", b"")
+        item["original_image"] = original
+    if not original:
+        return
+
+    original_digest = item.get("original_image_digest")
+    if not isinstance(original_digest, str) or len(original_digest) != 64:
+        original_digest = hashlib.sha256(original).hexdigest()
+        item["original_image_digest"] = original_digest
+
+    edit = item.setdefault("edit", {})
+    params = {key: edit.get(key, default) for key, default in IMAGE_ADJUSTMENT_DEFAULTS.items()}
+    signature_source = repr((original_digest, tuple(sorted(params.items())))).encode("utf-8")
+    signature = hashlib.sha256(signature_source).hexdigest()
+    if item.get("_processed_image_signature") == signature:
+        return
+
+    use_ai = bool(params["remove_background"])
+    batch_active = bool(st.session_state.get("_batch_processing_active", False))
+    local_progress = None
+    if use_ai and not batch_active and progress_callback is None:
+        local_progress = st.progress(0, text="Preparando remoção de fundo por IA…")
+
+    def _report(percent: int, message: str) -> None:
+        percent = max(0, min(100, int(percent)))
+        if progress_callback is not None:
+            progress_callback(percent, message)
+        elif local_progress is not None:
+            local_progress.progress(percent, text=message)
+
+    try:
+        def _run_image_processing():
+            return _process_artwork_image_cached(
+                original_digest, original, bool(params["remove_background"]),
+                int(params["white_balance_temperature"]), int(params["white_balance_tint"]),
+                float(params["exposure"]), int(params["contrast"]), int(params["saturation"]),
+                int(params["hue"]), int(params["sharpness"]),
+            )
+
+        if use_ai:
+            _report(4, "Preparando imagem para remoção de fundo…")
+            # O primeiro uso pode baixar/carregar o U²-Net; o spinner mantém o
+            # usuário informado durante essa etapa, mesmo quando não há callback
+            # de progresso interno disponível na biblioteca rembg.
+            with st.spinner("Carregando o modelo de IA (U²-Net)…"):
+                _get_background_removal_session()
+            _report(16, "Modelo pronto · IA analisando a imagem…")
+            with st.spinner("Removendo o fundo com IA. Esta etapa pode levar alguns instantes…"):
+                processed = _run_image_processing()
+            _report(92, "Finalizando transparência e composição…")
+        elif batch_active:
+            processed = _run_image_processing()
+        else:
+            with st.spinner("Aplicando correções à imagem…"):
+                processed = _run_image_processing()
+
+    except Exception as exc:
+        # Mantém a origem intacta e sinaliza o problema no painel da arte em foco.
+        item["image"] = original
+        item["image_digest"] = original_digest
+        item["thumbnail_data_url"] = _encode_pool_thumbnail(original, 96)
+        item["image_processing_error"] = str(exc)
+        item["_processed_image_signature"] = signature
+        if use_ai:
+            _report(100, "Não foi possível concluir a remoção de fundo.")
+        return
+
+    item["image"] = processed
+    item["image_digest"] = hashlib.sha256(processed).hexdigest()
+    item["thumbnail_data_url"] = _encode_pool_thumbnail(processed, 96)
+    item["_processed_image_signature"] = signature
+    item.pop("image_processing_error", None)
+    if use_ai:
+        _report(100, "Remoção de fundo concluída · 100%")
+
+
 def _legacy_initial_contain_zoom(image_bytes: bytes) -> float:
     """Reconhece o antigo preset de entrada (contain) para migração única.
 
@@ -876,19 +1180,29 @@ def render_artwork(
     blur_fill: bool = True,
     blur_mm: float = 0.5,
     background_mode: str | None = None,
+    background_image: Image.Image | None = None,
 ) -> Image.Image:
-    """Gera a arte sem guias; o fundo desfocado cobre toda a área de corte."""
+    """Gera a arte sem guias; um fundo personalizado pode preencher todo o corte."""
     pixels = max(1, round(spec.cut * ppm))
     center = pixels / 2
     background_mode = background_mode or ("blur" if fit_mode == "art" and blur_fill else "color")
     if background_mode not in {"color", "blur"}:
         background_mode = "color"
 
-    base = Image.new("RGB", (pixels, pixels), bg)
+    base = Image.new("RGBA", (pixels, pixels), (*ImageColor.getrgb(bg), 255))
+    if background_image is not None:
+        # A imagem de fundo cobre o quadrado externo da guia de corte. O recorte
+        # circular/quadrado é aplicado ao final, preservando a sangria visual.
+        backdrop_source = background_image.convert("RGBA")
+        backdrop = ImageOps.fit(
+            backdrop_source, (pixels, pixels), method=Image.Resampling.LANCZOS,
+            centering=(0.5, 0.5),
+        )
+        base.alpha_composite(backdrop)
     if img is not None:
         source = img.convert("RGBA")
 
-        if background_mode == "blur":
+        if background_image is None and background_mode == "blur":
             # O backdrop é criado separadamente da arte nítida: ele sempre cobre
             # TODO o corte, centralizado, mesmo quando a arte é movida ou reduzida.
             # Para PNG transparente, o conteúdo visível é recortado antes de
@@ -902,25 +1216,28 @@ def render_artwork(
                 ppm,
                 center,
             )
-            base = backdrop.filter(
+            blurred = backdrop.filter(
                 ImageFilter.GaussianBlur(radius=max(0.0, float(blur_mm) * ppm))
             )
+            base = Image.new("RGBA", blurred.size, (0, 0, 0, 255))
+            base.alpha_composite(blurred.convert("RGBA"))
 
         # A arte principal usa exatamente o zoom e os deslocamentos definidos
         # no editor. O fundo desfocado permanece fixo e preenche qualquer espaço
         # que a arte não ocupar dentro da guia de corte.
-        if fit_mode == "art":
-            sharp = Image.new("RGBA", (pixels, pixels), (0, 0, 0, 0))
+        # O preset selecionado continua controlando a escala da arte principal.
+        # Com fundo personalizado, apenas a máscara de visibilidade fica limitada
+        # à guia Arte, deixando o anel Arte–Corte livre para a borda decorativa.
+        effective_fit_mode = fit_mode if fit_mode in {"cut", "art"} else "cut"
+        if effective_fit_mode == "art":
+            foreground = Image.new("RGBA", (pixels, pixels), (0, 0, 0, 0))
             _paste_box(
-                sharp,
+                foreground,
                 source,
                 fit_image_box(source.width, source.height, spec.art, zoom, off_x, off_y),
                 ppm,
                 center,
             )
-            art_mask = _shape_mask(spec.shape, (pixels, pixels), spec.art * ppm)
-            sharp.putalpha(ImageChops.multiply(sharp.getchannel("A"), art_mask))
-            foreground = sharp
         else:
             foreground = Image.new("RGBA", (pixels, pixels), (0, 0, 0, 0))
             _paste_box(
@@ -930,10 +1247,16 @@ def render_artwork(
                 ppm,
                 center,
             )
+        if effective_fit_mode == "art" or background_image is not None:
+            visible_diameter = spec.art if (effective_fit_mode == "art" or background_image is not None) else spec.cut
+            visible_mask = _shape_mask(spec.shape, (pixels, pixels), visible_diameter * ppm)
+            foreground.putalpha(ImageChops.multiply(foreground.getchannel("A"), visible_mask))
 
         composed = base.convert("RGBA")
         composed.alpha_composite(foreground)
         base = composed.convert("RGB")
+    else:
+        base = base.convert("RGB")
 
     cut_mask = _shape_mask(spec.shape, (pixels, pixels), spec.cut * ppm)
     outside = Image.new("RGB", (pixels, pixels), bg)
@@ -1026,6 +1349,7 @@ def render_button(
     blur_fill: bool = True,
     blur_mm: float = 0.5,
     background_mode: str | None = None,
+    background_image: Image.Image | None = None,
     ss: int = 2,
 ) -> Image.Image:
     """Renderiza o botton com guias; ppm = pixels por mm."""
@@ -1037,7 +1361,7 @@ def render_button(
     artwork = render_artwork(
         spec, img, ppm=mm_px, zoom=zoom, off_x=off_x, off_y=off_y, bg=bg,
         fit_mode=fit_mode, blur_fill=blur_fill, blur_mm=blur_mm,
-        background_mode=background_mode,
+        background_mode=background_mode, background_image=background_image,
     ).convert("RGBA")
     cut_mask = _shape_mask(spec.shape, artwork.size, spec.cut * mm_px)
     artwork.putalpha(cut_mask)
@@ -1079,6 +1403,7 @@ def layout_settings_profile_key(
 def render_sheet_preview(
     spec, img, positions, page_w, page_h, *, zoom, off_x, off_y, bg, guides,
     fit_mode="cut", blur_fill=True, blur_mm=0.5, background_mode=None,
+    background_image=None,
 ) -> Image.Image:
     ppm = sheet_preview_pixels_per_mm(page_w, page_h)
     sheet = Image.new("RGB", (round(page_w * ppm), round(page_h * ppm)), "white")
@@ -1089,6 +1414,7 @@ def render_sheet_preview(
         spec, img, ppm=ppm, zoom=zoom, off_x=off_x, off_y=off_y, bg=bg, guides=guides,
         pad_mm=0.5, line_mm=0.25, fit_mode=fit_mode,
         blur_fill=blur_fill, blur_mm=blur_mm, background_mode=background_mode,
+        background_image=background_image,
     )
     for x, y in positions:
         sheet.paste(btn, (round(x * ppm - btn.width / 2), round(y * ppm - btn.height / 2)), btn)
@@ -1098,7 +1424,7 @@ def render_sheet_preview(
 def render_mixed_sheet_preview(
     items, placements, page_w, page_h, *, zoom=1.0, off_x=0.0, off_y=0.0,
     bg="#FFFFFF", guides=tuple(g.key for g in GUIDES), fit_mode="cut",
-    blur_fill=True, blur_mm=0.5, background_mode=None,
+    blur_fill=True, blur_mm=0.5, background_mode=None, background_image=None,
 ) -> Image.Image:
     """Prévia de uma folha com arte e escala física visual estável por orientação."""
     ppm = sheet_preview_pixels_per_mm(page_w, page_h)
@@ -1116,6 +1442,7 @@ def render_mixed_sheet_preview(
             blur_fill=item.get("blur_fill", blur_fill),
             blur_mm=item.get("blur_mm", blur_mm),
             background_mode=item.get("background_mode", background_mode),
+            background_image=item.get("background_image", background_image),
         )
         sheet.paste(
             button,
@@ -1171,12 +1498,13 @@ def draw_guides(c: canvas.Canvas, cx: float, cy: float, spec: ButtonSpec, enable
 def build_pdf(
     spec, img, positions, page_w, page_h, qty, *, zoom, off_x, off_y, bg, guides,
     fit_mode="cut", blur_fill=True, blur_mm=0.5, background_mode=None,
+    background_image=None,
 ) -> bytes:
     # A composição é rasterizada em alta resolução; as linhas permanecem vetoriais.
     artwork = render_artwork(
         spec, img, ppm=PDF_MAX_DPI / 25.4, zoom=zoom, off_x=off_x, off_y=off_y,
         bg=bg, fit_mode=fit_mode, blur_fill=blur_fill, blur_mm=blur_mm,
-        background_mode=background_mode,
+        background_mode=background_mode, background_image=background_image,
     )
     jpeg = io.BytesIO()
     artwork.save(jpeg, "JPEG", quality=95, subsampling=0)
@@ -1242,6 +1570,7 @@ def build_mixed_pdf(
             blur_fill=item.get("blur_fill", blur_fill),
             blur_mm=item.get("blur_mm", blur_mm),
             background_mode=item.get("background_mode", background_mode),
+            background_image=item.get("background_image", background_image),
         )
         jpeg = io.BytesIO()
         artwork.save(jpeg, "JPEG", quality=95, subsampling=0)
@@ -1297,6 +1626,7 @@ def build_art_batch_pdf(
             bg=item.get("bg", bg), fit_mode=item["fit_mode"],
             blur_fill=item.get("blur_fill", True), blur_mm=item.get("blur_mm", 0.5),
             background_mode=item.get("background_mode", "color"),
+            background_image=item.get("background_image"),
         )
         jpeg = io.BytesIO()
         artwork.save(jpeg, "JPEG", quality=95, subsampling=0)
@@ -1583,97 +1913,469 @@ def make_artwork_settings_callback(item_id: int, widget_suffix: str):
     return _save_field
 
 
-def apply_batch_artwork_settings(item_ids: list[int], spec: ButtonSpec, source_item_id: int | None = None) -> int:
-    """Aplica os controles existentes da arte em foco às artes selecionadas no Pool.
+def _batch_activate_art_area_preserving_transform(item: dict, spec: ButtonSpec) -> set[str]:
+    """Ativa a área da arte para exibir preenchimentos, preservando ajustes manuais.
 
-    Só copia os presets de enquadramento se um deles estiver marcado. Não copia
-    deslocamentos/zoom manuais: cada arte continua com seu próprio posicionamento.
-    Modo/cor/intensidade do preenchimento são copiados do painel já existente.
+    Reproduz a regra da edição individual: se a arte ainda usa o preset Corte,
+    passa para o preset Arte; se já está em enquadramento livre/manual, converte
+    apenas a base geométrica e preserva tamanho físico e deslocamentos.
     """
-    targets = {int(value) for value in item_ids}
-    if not targets:
-        return 0
+    edit = item.setdefault("edit", {})
+    changed: set[str] = set()
+    cut_checked = bool(edit.get("fit_cut_checked", False))
+    art_checked = bool(edit.get("fit_art_checked", False))
+    manual = bool(edit.get("manual_transform_active", False)) or not (cut_checked or art_checked)
+    current_mode = str(edit.get("fit_basis_mode", "cut")).lower()
+    if current_mode not in {"cut", "art"}:
+        current_mode = "cut"
+    profile = edit.get("scale_reference_spec")
+    if not isinstance(profile, dict):
+        profile = _button_scale_profile(spec)
 
-    source_id = source_item_id if source_item_id is not None else st.session_state.get("artwork_selected_id")
     try:
-        source_id = int(source_id)
-    except (TypeError, ValueError):
-        return 0
-    source = _find_artwork_item(source_id)
-    if source is None:
-        return 0
-    _commit_artwork_editor_state(source_id)
-    # The General Adjustments panel is the single source for batch settings.
-    # Persist its current widget values before reading the selected artwork's
-    # canonical edit record; this also covers a click immediately after a change.
-    _persist_artwork_fields(
-        source_id,
-        ("fit_basis_mode", "fit_cut_checked", "fit_art_checked",
-         "background_mode", "background", "blur_strength"),
-    )
-    source_edit = source.setdefault("edit", {})
+        cut_diameter = float(profile["cut"])
+        art_diameter = float(profile["art"])
+        safe_diameter = float(profile["safe"])
+        profile_valid = all(math.isfinite(v) and v > 0 for v in (cut_diameter, art_diameter, safe_diameter))
+    except (KeyError, TypeError, ValueError):
+        profile_valid = False
+        cut_diameter = art_diameter = safe_diameter = 0.0
 
-    source_cut_checked = bool(source_edit.get("fit_cut_checked"))
-    source_art_checked = bool(source_edit.get("fit_art_checked"))
-    fit_mode = None
-    if source_cut_checked and not source_art_checked:
-        fit_mode = "cut"
-    elif source_art_checked and not source_cut_checked:
-        fit_mode = "art"
-    source_basis_mode = str(source_edit.get("fit_basis_mode", "cut")).lower()
-    if source_basis_mode not in {"cut", "art"}:
-        source_basis_mode = fit_mode or "cut"
-
-    background_mode = (
-        "blur" if str(source_edit.get("background_mode", "Cor sólida")) == "Imagem desfocada"
-        else "color"
-    )
-    background = str(source_edit.get("background", "#FFFFFF")).upper()
-    try:
-        ImageColor.getrgb(background)
-    except ValueError:
-        background = "#FFFFFF"
-    try:
-        blur_strength = max(0.0, min(18.0, float(source_edit.get("blur_strength", 0.5))))
-    except (TypeError, ValueError):
-        blur_strength = 0.5
-
-    profile = _button_scale_profile(spec)
-    updated = 0
-    for item in st.session_state.get("artwork_items", []):
-        item_id = int(item.get("id", -1))
-        if item_id not in targets:
-            continue
-        edit = item.setdefault("edit", {})
-        edit["fit_basis_mode"] = source_basis_mode
-        edit["fit_cut_checked"] = fit_mode == "cut"
-        edit["fit_art_checked"] = fit_mode == "art"
-        if fit_mode in {"cut", "art"}:
-            # Ao aplicar um preset, todas as selecionadas recebem o mesmo
-            # enquadramento-base, mas continuam com IDs/estados independentes.
+    if manual:
+        zoom = float(edit.get("zoom", 1.0))
+        off_x = float(edit.get("offset_x", 0.0))
+        off_y = float(edit.get("offset_y", 0.0))
+        if current_mode != "art" and profile_valid:
+            try:
+                image_width, image_height = get_image_dimensions(
+                    str(item.get("image_digest", "")), item.get("image", b"")
+                )
+                old_basis = float(min(image_width, image_height))
+                new_basis = float(max(image_width, image_height))
+                if old_basis > 0 and new_basis > 0:
+                    zoom *= (cut_diameter / old_basis) / (art_diameter / new_basis)
+                else:
+                    zoom *= cut_diameter / art_diameter
+            except Exception:
+                zoom *= cut_diameter / art_diameter
+        zoom = max(0.01, min(20.0, zoom))
+        edit["fit_basis_mode"] = "art"
+        edit["fit_cut_checked"] = False
+        edit["fit_art_checked"] = False
+        edit["manual_transform_active"] = True
+        edit["zoom"] = zoom
+        edit["offset_x"] = max(-5000.0, min(5000.0, off_x))
+        edit["offset_y"] = max(-5000.0, min(5000.0, off_y))
+        if current_mode != "art":
+            edit["transform_revision"] = int(edit.get("transform_revision", 0) or 0) + 1
+        changed.update({
+            "fit_basis_mode", "fit_cut_checked", "fit_art_checked", "manual_transform_active",
+            "zoom", "offset_x", "offset_y", "transform_revision",
+        })
+    else:
+        # Um preset ativo ainda não foi personalizado: mudar Corte -> Arte
+        # reproduz a ação explícita do usuário na edição individual.
+        if not (art_checked and not cut_checked and current_mode == "art"):
+            edit["fit_basis_mode"] = "art"
+            edit["fit_cut_checked"] = False
+            edit["fit_art_checked"] = True
+            edit["manual_transform_active"] = False
             edit["zoom"] = 1.0
             edit["offset_x"] = 0.0
             edit["offset_y"] = 0.0
             edit["transform_revision"] = int(edit.get("transform_revision", 0) or 0) + 1
-            edit["scale_reference_spec"] = profile
-            edit["scale_reference_diameter"] = float(spec.safe)
-            edit["initial_cut_fit_schema"] = 4
-            edit["manual_transform_active"] = False
-            _safety_relative_transform(edit, profile)
+            edit["event_seq"] = int(edit.get("event_seq", 0) or 0) + 1
+            changed.update({
+                "fit_basis_mode", "fit_cut_checked", "fit_art_checked", "manual_transform_active",
+                "zoom", "offset_x", "offset_y", "transform_revision", "event_seq",
+            })
+
+    edit["scale_reference_spec"] = profile
+    edit["scale_reference_diameter"] = float(spec.safe)
+    _safety_relative_transform(edit, profile)
+    changed.update({"scale_reference_spec", "scale_reference_diameter"})
+    return changed
+
+
+def apply_batch_artwork_settings(
+    item_ids: list[int],
+    spec: ButtonSpec,
+    *,
+    framing_mode: str | None = None,
+    fill_mode: str | None = None,
+    blur_strength: float = BATCH_BLUR_DEFAULT,
+    blur_base_color: str | None = None,
+    solid_background_color: str | None = None,
+    background_color: str | None = None,
+    custom_background_payload: tuple[bytes, str, str] | None = None,
+    progress_callback=None,
+) -> dict:
+    """Aplica opções independentes diretamente a todas as artes marcadas.
+
+    Não utiliza a imagem em foco como origem. A própria seleção do Pool define
+    os destinos e inclui a arte em foco quando ela estiver marcada.
+    """
+    selected_ids: list[int] = []
+    for value in item_ids:
+        try:
+            item_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item_id not in selected_ids:
+            selected_ids.append(item_id)
+
+    if not selected_ids:
+        return {"updated": 0, "errors": []}
+
+    framing_mode = framing_mode if framing_mode in {"cut", "art"} else None
+    fill_mode = fill_mode if fill_mode in {"blur", "color"} else None
+
+    try:
+        blur_strength = max(0.0, min(18.0, float(blur_strength)))
+    except (TypeError, ValueError):
+        blur_strength = BATCH_BLUR_DEFAULT
+
+    # Compatibilidade com sessões e chamadas antigas que usavam uma única cor.
+    legacy_color = background_color if background_color is not None else BATCH_BACKGROUND_DEFAULT
+
+    def _validated_color(value, fallback):
+        try:
+            ImageColor.getrgb(str(value))
+            return str(value).upper()
+        except (TypeError, ValueError):
+            return fallback
+
+    blur_base_color = _validated_color(
+        blur_base_color if blur_base_color is not None else legacy_color,
+        BATCH_BACKGROUND_DEFAULT,
+    )
+    solid_background_color = _validated_color(
+        solid_background_color if solid_background_color is not None else legacy_color,
+        BATCH_BACKGROUND_DEFAULT,
+    )
+
+    bg_data = b""
+    bg_digest = ""
+    bg_name = ""
+    if custom_background_payload is not None:
+        try:
+            bg_data, bg_digest, bg_name = custom_background_payload
+            if not isinstance(bg_data, bytes) or not bg_data:
+                raise ValueError("A imagem de fundo personalizada não é válida.")
+            actual_digest = hashlib.sha256(bg_data).hexdigest()
+            if str(bg_digest) != actual_digest:
+                raise ValueError("A imagem de fundo personalizada está corrompida. Selecione o arquivo novamente.")
+        except Exception as exc:
+            return {"updated": 0, "errors": [str(exc)]}
+
+    # Prioridade defensiva: mesmo que uma sessão antiga guarde flags
+    # incompatíveis, o modo Corte vence todos os fundos. Caso contrário,
+    # imagem personalizada vence Desfoque/Cor; estes, por sua vez, exigem
+    # o enquadramento na área da arte para que o fundo fique visível.
+    if framing_mode == "cut":
+        fill_mode = None
+        bg_data = b""
+        bg_digest = ""
+        bg_name = ""
+    elif bg_data:
+        fill_mode = None
+    # If a fill/background is requested without an explicit framing command,
+    # each artwork is moved to the Arte clipping basis using the same
+    # manual-transform-preserving rule as the individual editor.
+
+    by_id = {
+        int(item.get("id", -1)): item
+        for item in st.session_state.get("artwork_items", [])
+    }
+    target_items = [by_id[item_id] for item_id in selected_ids if item_id in by_id]
+    total = len(target_items)
+    if total == 0:
+        return {"updated": 0, "errors": []}
+
+    # Confirma movimentos/zoom recentes no canvas antes de aplicar um preset
+    # à arte em foco. Esta chamada não define a origem das demais artes.
+    current_selected_id = st.session_state.get("artwork_selected_id")
+    try:
+        focused_is_selected = current_selected_id is not None and int(current_selected_id) in selected_ids
+    except (TypeError, ValueError):
+        focused_is_selected = False
+    if focused_is_selected:
+        try:
+            _commit_artwork_editor_state(int(current_selected_id))
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    profile = _button_scale_profile(spec)
+    updated = 0
+    errors: list[str] = []
+
+    for index, item in enumerate(target_items):
+        item_id = int(item.get("id", -1))
+        item_name = str(item.get("name", f"Arte {item_id}"))
+        edit = item.setdefault("edit", {})
+        try:
+            if progress_callback:
+                progress_callback(
+                    index, total, item_name, "Aplicando configurações",
+                    int(round(index / max(total, 1) * 100)),
+                )
+
+            changed_fields: set[str] = set()
+
+            def _clear_custom_background_layer() -> None:
+                edit["custom_background_active"] = False
+                edit["custom_background_pending"] = False
+                edit["background_image_bytes"] = None
+                edit["background_image_digest"] = ""
+                edit["background_image_name"] = ""
+                edit["custom_background_revision"] = int(edit.get("custom_background_revision", 0) or 0) + 1
+                edit["background_upload_revision"] = int(edit.get("background_upload_revision", 0) or 0) + 1
+                edit.pop("background_image_previous_transform", None)
+                edit.pop("background_image_previous_fill_mode", None)
+                edit.pop("background_image_error", None)
+                changed_fields.update({
+                    "background_image_bytes", "background_image_digest", "background_image_name",
+                    "custom_background_active", "custom_background_pending", "custom_background_revision",
+                    "background_upload_revision",
+                })
+
+            if framing_mode == "cut":
+                # Mesmo comportamento da edição individual: o preenchimento
+                # fica suspenso, mas cores e intensidade são preservadas.
+                previous_mode = str(edit.get("background_mode", "Cor sólida"))
+                if previous_mode == "Fundo personalizado":
+                    previous_mode = str(edit.get("background_image_previous_fill_mode", "Cor sólida"))
+                if previous_mode == "Sem preenchimento":
+                    previous_mode = str(edit.get("fit_cut_previous_fill_mode", "Cor sólida"))
+                if previous_mode not in {"Cor sólida", "Imagem desfocada"}:
+                    previous_mode = "Cor sólida"
+                edit["fit_cut_previous_fill_mode"] = previous_mode
+                _clear_custom_background_layer()
+                edit["background_mode"] = "Sem preenchimento"
+                edit.pop("background_image_previous_fill_mode", None)
+                edit["fit_basis_mode"] = "cut"
+                edit["fit_cut_checked"] = True
+                edit["fit_art_checked"] = False
+                edit["manual_transform_active"] = False
+                edit["zoom"] = 1.0
+                edit["offset_x"] = 0.0
+                edit["offset_y"] = 0.0
+                edit["transform_revision"] = int(edit.get("transform_revision", 0) or 0) + 1
+                edit["event_seq"] = int(edit.get("event_seq", 0) or 0) + 1
+                edit["scale_reference_spec"] = profile
+                edit["scale_reference_diameter"] = float(spec.safe)
+                _safety_relative_transform(edit, profile)
+                changed_fields.update({
+                    "background_mode", "fit_cut_previous_fill_mode", "fit_basis_mode",
+                    "fit_cut_checked", "fit_art_checked", "manual_transform_active",
+                    "zoom", "offset_x", "offset_y", "transform_revision", "event_seq",
+                    "scale_reference_spec", "scale_reference_diameter",
+                })
+
+            elif framing_mode == "art":
+                # Preset explícito: aplica o ajuste padrão, como o checkbox individual.
+                edit["fit_basis_mode"] = "art"
+                edit["fit_cut_checked"] = False
+                edit["fit_art_checked"] = True
+                edit["manual_transform_active"] = False
+                edit["zoom"] = 1.0
+                edit["offset_x"] = 0.0
+                edit["offset_y"] = 0.0
+                edit["transform_revision"] = int(edit.get("transform_revision", 0) or 0) + 1
+                edit["event_seq"] = int(edit.get("event_seq", 0) or 0) + 1
+                edit["scale_reference_spec"] = profile
+                edit["scale_reference_diameter"] = float(spec.safe)
+                _safety_relative_transform(edit, profile)
+                changed_fields.update({
+                    "fit_basis_mode", "fit_cut_checked", "fit_art_checked", "manual_transform_active",
+                    "zoom", "offset_x", "offset_y", "transform_revision", "event_seq",
+                    "scale_reference_spec", "scale_reference_diameter",
+                })
+                if str(edit.get("background_mode", "")) == "Sem preenchimento":
+                    restored = str(edit.pop("fit_cut_previous_fill_mode", "Cor sólida"))
+                    if restored not in {"Cor sólida", "Imagem desfocada"}:
+                        restored = "Cor sólida"
+                    edit["background_mode"] = restored
+                    changed_fields.update({"background_mode", "fit_cut_previous_fill_mode"})
+
+            elif fill_mode in {"blur", "color"} or bg_data:
+                # Sem preset explícito, aplica a mesma transição do editor
+                # individual: exige recorte pela guia Arte, mas preserva
+                # zoom e deslocamentos caso o usuário esteja em modo manual.
+                changed_fields.update(_batch_activate_art_area_preserving_transform(item, spec))
+
+            if framing_mode != "cut" and fill_mode in {"blur", "color"}:
+                # Desfoque/Cor substituem o fundo personalizado, mas não alteram
+                # a transformação manual da imagem principal.
+                if (
+                    edit.get("custom_background_active")
+                    or edit.get("background_image_bytes")
+                    or edit.get("custom_background_pending")
+                    or str(edit.get("background_mode", "")) == "Fundo personalizado"
+                ):
+                    _clear_custom_background_layer()
+                edit.pop("fit_cut_previous_fill_mode", None)
+                edit.pop("background_image_previous_fill_mode", None)
+                if fill_mode == "blur":
+                    edit["background_mode"] = "Imagem desfocada"
+                    edit["blur_base_color"] = blur_base_color
+                    edit["blur_strength"] = blur_strength
+                    changed_fields.update({"background_mode", "blur_base_color", "blur_strength"})
+                else:
+                    edit["background_mode"] = "Cor sólida"
+                    edit["background"] = solid_background_color
+                    changed_fields.update({"background_mode", "background"})
+
+            elif framing_mode != "cut" and bg_data:
+                # A imagem de borda é um modo próprio; o preenchimento anterior
+                # permanece guardado para quando a camada for removida.
+                previous_mode = str(edit.get("background_mode", "Cor sólida"))
+                if previous_mode == "Fundo personalizado":
+                    previous_mode = str(edit.get("background_image_previous_fill_mode", "Cor sólida"))
+                if previous_mode == "Sem preenchimento":
+                    previous_mode = str(edit.get("fit_cut_previous_fill_mode", "Cor sólida"))
+                if previous_mode not in {"Cor sólida", "Imagem desfocada"}:
+                    previous_mode = "Cor sólida"
+                edit["background_image_previous_fill_mode"] = previous_mode
+                edit.pop("fit_cut_previous_fill_mode", None)
+                edit["background_mode"] = "Fundo personalizado"
+                edit["background_image_bytes"] = bg_data
+                edit["background_image_digest"] = bg_digest
+                edit["background_image_name"] = bg_name or "Fundo personalizado"
+                edit["custom_background_active"] = True
+                edit["custom_background_pending"] = False
+                edit.pop("background_image_previous_transform", None)
+                edit["custom_background_revision"] = int(edit.get("custom_background_revision", 0) or 0) + 1
+                edit["background_upload_revision"] = int(edit.get("background_upload_revision", 0) or 0) + 1
+                edit.pop("background_image_error", None)
+                changed_fields.update({
+                    "background_mode", "background_image_bytes", "background_image_digest",
+                    "background_image_name", "custom_background_active", "custom_background_pending",
+                    "background_image_previous_fill_mode", "custom_background_revision", "background_upload_revision",
+                })
+
+            # Sincroniza controles da arte em foco antes de os widgets serem
+            # instanciados mais abaixo nesta execução do Streamlit.
+            prefix = f"artwork_{item_id}"
+            for field in changed_fields:
+                widget_key = f"{prefix}_{field}"
+                if widget_key in st.session_state:
+                    st.session_state[widget_key] = edit.get(field)
+
+            updated += 1
+            if progress_callback:
+                progress_callback(
+                    index + 1, total, item_name, "Concluído",
+                    int(round((index + 1) / max(total, 1) * 100)),
+                )
+        except Exception as exc:
+            errors.append(f"{item_name}: {exc}")
+
+    if updated:
+        st.session_state.pop("focused_art_png_export", None)
+        st.session_state.pop("pdf", None)
+        st.session_state.pop("_sheet_real_size_preview_cache", None)
+        st.session_state.pop("_sheet_preview_cache", None)
+
+    return {"updated": updated, "errors": errors}
+
+
+def apply_batch_background_removal(
+    item_ids: list[int],
+    *,
+    progress_callback=None,
+) -> dict:
+    """Remove o fundo por IA de todas as artes marcadas no Pool.
+
+    A ação é independente das demais opções de lote e também processa a arte
+    em foco quando ela estiver marcada. Cada imagem usa seu próprio original.
+    """
+    selected_ids: list[int] = []
+    for value in item_ids:
+        try:
+            item_id = int(value)
+        except (TypeError, ValueError):
+            continue
+        if item_id not in selected_ids:
+            selected_ids.append(item_id)
+
+    if not selected_ids:
+        return {"updated": 0, "errors": []}
+
+    by_id = {
+        int(item.get("id", -1)): item
+        for item in st.session_state.get("artwork_items", [])
+    }
+    target_items = [by_id[item_id] for item_id in selected_ids if item_id in by_id]
+    total = len(target_items)
+    if total == 0:
+        return {"updated": 0, "errors": []}
+
+    current_selected_id = st.session_state.get("artwork_selected_id")
+    try:
+        focused_is_selected = current_selected_id is not None and int(current_selected_id) in selected_ids
+    except (TypeError, ValueError):
+        focused_is_selected = False
+    if focused_is_selected:
+        try:
+            _commit_artwork_editor_state(int(current_selected_id))
+        except (TypeError, ValueError, KeyError):
+            pass
+
+    updated = 0
+    errors: list[str] = []
+    previous_batch_flag = bool(st.session_state.get("_batch_processing_active", False))
+    st.session_state["_batch_processing_active"] = True
+    try:
+        for index, target in enumerate(target_items):
+            target_id = int(target.get("id", -1))
+            target_name = str(target.get("name", f"Arte {target_id}"))
+            edit = target.setdefault("edit", {})
+            edit["remove_background"] = True
+            widget_key = f"artwork_{target_id}_remove_background"
+            if widget_key in st.session_state:
+                st.session_state[widget_key] = True
+
+            # Uma falha anterior grava a assinatura; esta ação explícita tenta
+            # novamente em vez de reutilizar o resultado de erro em cache.
+            if target.pop("image_processing_error", None):
+                target.pop("_processed_image_signature", None)
+
+            if progress_callback:
+                progress_callback(index, total, target_name, "Preparando IA", 0)
+
+            def _item_progress(local_percent: int, stage: str) -> None:
+                if progress_callback:
+                    overall = int(round(((index + max(0, min(100, local_percent)) / 100) / max(total, 1)) * 100))
+                    progress_callback(index, total, target_name, stage, overall)
+
+            _sync_processed_artwork(target, progress_callback=_item_progress)
+            processing_error = target.get("image_processing_error")
+            if processing_error:
+                errors.append(f"{target_name}: {processing_error}")
+            updated += 1
+            if progress_callback:
+                overall = int(round((index + 1) / max(total, 1) * 100))
+                progress_callback(index + 1, total, target_name, "Concluído", overall)
+    finally:
+        if previous_batch_flag:
+            st.session_state["_batch_processing_active"] = True
         else:
-            # Se a arte-fonte está em ajuste manual, replicamos o estado dos
-            # controles sem copiar a posição/zoom da fonte para as demais.
-            edit["manual_transform_active"] = True
-        # Copiar o conjunto de preenchimento da arte-fonte, usando os controles
-        # que já existem à esquerda do editor.
-        edit["background_mode"] = source_edit.get("background_mode", "Cor sólida")
-        edit["background"] = background
-        edit["blur_strength"] = blur_strength
-        updated += 1
-    return updated
+            st.session_state.pop("_batch_processing_active", None)
+
+    if updated:
+        st.session_state.pop("focused_art_png_export", None)
+        st.session_state.pop("pdf", None)
+        st.session_state.pop("_sheet_real_size_preview_cache", None)
+        st.session_state.pop("_sheet_preview_cache", None)
+
+    return {"updated": updated, "errors": errors}
 
 
 def _on_pool_batch_selection_change() -> None:
+    if st.session_state.get("_pool_component_batch_clear_pending", False):
+        st.session_state["artwork_batch_selected_ids"] = []
+        return
     result = st.session_state.get("artwork_pool_ui")
     raw = _component_value(result, "selected_ids")
     if raw is None:
@@ -1733,92 +2435,209 @@ def _cancel_fallback_batch_delete() -> None:
     st.session_state.pop("_pool_pending_delete_ids", None)
 
 
-def _on_pool_apply_selected_fallback() -> None:
-    selected = st.session_state.get("artwork_batch_selected_ids", [])
-    selected_id = st.session_state.get("artwork_selected_id")
+def _on_pool_apply_selected_fallback(progress_bar=None, settings: dict | None = None) -> dict:
+    """Aplica as opções marcadas a todas as artes selecionadas, inclusive a atual."""
+    selected = [int(value) for value in st.session_state.get("artwork_batch_selected_ids", [])]
     spec = BUTTONS.get(str(st.session_state.get("single_size")))
-    if spec is not None:
-        count = apply_batch_artwork_settings([int(value) for value in selected], spec, selected_id)
-        st.session_state["_artwork_batch_notice"] = f"Ajustes aplicados a {count} arte(s) selecionada(s)."
-
-
-def make_color_eyedropper_callback(component_key: str, color_key: str, item_id: int | None = None):
-    """Aplica a cor selecionada e grava somente o fundo da arte correspondente."""
-    def _apply_picked_color():
-        result = st.session_state.get(component_key)
-        picked = _component_value(result, "picked_color")
-        if isinstance(picked, str) and len(picked) == 7 and picked.startswith("#"):
-            try:
-                ImageColor.getrgb(picked)
-            except ValueError:
+    settings = settings if isinstance(settings, dict) else {}
+    has_options = any((
+        settings.get("framing_mode") in {"cut", "art"},
+        settings.get("fill_mode") in {"blur", "color"},
+        settings.get("custom_background_payload") is not None,
+    ))
+    if spec is None or not selected or not has_options:
+        result = {"updated": 0, "errors": []}
+    else:
+        def _update_progress(done: int, total: int, name: str, stage: str, overall_percent: int | None = None) -> None:
+            if progress_bar is None or total <= 0:
                 return
-            st.session_state[color_key] = picked.upper()
-            if item_id is not None:
-                _persist_artwork_fields(int(item_id), ("background",))
-    return _apply_picked_color
+            percent = max(0, min(100, int(overall_percent if overall_percent is not None else round((done / total) * 100))))
+            current_index = min(done + 1, total) if stage != "Concluído" else max(1, done)
+            progress_bar.progress(
+                percent,
+                text=f"Aplicando ajustes em lote · {percent}% · {stage}: {name} ({current_index}/{total})",
+            )
+
+        result = apply_batch_artwork_settings(
+            selected,
+            spec,
+            framing_mode=settings.get("framing_mode"),
+            fill_mode=settings.get("fill_mode"),
+            blur_strength=settings.get("blur_strength", BATCH_BLUR_DEFAULT),
+            blur_base_color=settings.get("blur_base_color", BATCH_BACKGROUND_DEFAULT),
+            solid_background_color=settings.get("solid_background_color", BATCH_BACKGROUND_DEFAULT),
+            background_color=settings.get("background_color"),  # compatibilidade com chamadas legadas
+            custom_background_payload=settings.get("custom_background_payload"),
+            progress_callback=_update_progress,
+        )
+
+    count = int(result.get("updated", 0))
+    errors = result.get("errors") or []
+    if count:
+        notice = f"Ajustes em lote aplicados a {count} arte(s) selecionada(s), incluindo a arte em foco quando marcada no Pool."
+    else:
+        notice = "Nenhuma arte recebeu alterações. Confira a seleção no Pool e as opções marcadas."
+    if errors:
+        notice += f" {len(errors)} arte(s) apresentaram erro; confira os detalhes abaixo."
+    st.session_state["_artwork_batch_notice"] = notice
+    st.session_state["_artwork_batch_errors"] = errors
+    return result
+
+
+def _on_pool_batch_remove_background_fallback(progress_bar=None) -> dict:
+    """Executa remoção por IA em todas as artes marcadas, sem imagem de origem."""
+    selected = [int(value) for value in st.session_state.get("artwork_batch_selected_ids", [])]
+
+    def _update_progress(done: int, total: int, name: str, stage: str, overall_percent: int | None = None) -> None:
+        if progress_bar is None or total <= 0:
+            return
+        percent = max(0, min(100, int(overall_percent if overall_percent is not None else round((done / total) * 100))))
+        current_index = min(done + 1, total) if stage != "Concluído" else max(1, done)
+        progress_bar.progress(
+            percent,
+            text=f"Remoção de fundo por IA · {percent}% · {stage}: {name} ({current_index}/{total})",
+        )
+
+    result = apply_batch_background_removal(
+        selected,
+        progress_callback=_update_progress,
+    )
+    count = int(result.get("updated", 0))
+    errors = result.get("errors") or []
+    if count:
+        notice = f"Remoção de fundo por IA executada em {count} arte(s) selecionada(s), incluindo a arte em foco quando marcada no Pool."
+    else:
+        notice = "Nenhuma arte recebeu remoção. Marque as imagens desejadas no Pool."
+    if errors:
+        notice += f" {len(errors)} arte(s) apresentaram erro; confira os detalhes abaixo."
+    st.session_state["_artwork_batch_notice"] = notice
+    st.session_state["_artwork_batch_errors"] = errors
+    return result
+
+
+def _finalize_successful_batch_operation(result: dict, operation_label: str) -> bool:
+    """Limpa a seleção e reinicia o painel somente após sucesso integral.
+
+    Se houver qualquer erro, mantém a seleção para permitir conferência/repetição.
+    A arte em foco (moldura verde) nunca é alterada por esta função.
+    """
+    if not isinstance(result, dict):
+        return False
+    try:
+        updated = int(result.get("updated", 0) or 0)
+    except (TypeError, ValueError):
+        updated = 0
+    errors = result.get("errors") or []
+    if updated <= 0 or errors:
+        return False
+
+    selected_ids = list(st.session_state.get("artwork_batch_selected_ids", []))
+    st.session_state["artwork_batch_selected_ids"] = []
+    # O componente visual é controlado pelo estado enviado pelo Python. Este
+    # sinal impede que um valor antigo do componente reintroduza a seleção.
+    st.session_state["_pool_component_batch_clear_pending"] = True
+    # Os toggles touch do fallback leem essas chaves diretamente; zerá-las
+    # antes do próximo rerun atualiza os símbolos das caixas no Pool.
+    st.session_state["_pool_fallback_batch_clear_pending"] = True
+    # Uma nova chave para o contêiner recria o expander recolhido no próximo run.
+    st.session_state["_artwork_batch_panel_reset_version"] = int(
+        st.session_state.get("_artwork_batch_panel_reset_version", 0) or 0
+    ) + 1
+
+    notice = st.session_state.get("_artwork_batch_notice")
+    if notice:
+        st.session_state["_artwork_batch_notice"] = (
+            f"{operation_label} concluído em {updated} arte(s). O painel foi recolhido e "
+            f"{len(selected_ids)} seleção(ões) foram desmarcadas no Pool. A arte em foco foi preservada."
+        )
+    return True
+
+
+def make_batch_color_picker_callback(component_key: str, color_key: str):
+    """Persiste a cor escolhida nos controles globais do ajuste em lote."""
+    def _save_color():
+        result = st.session_state.get(component_key)
+        color = _component_value(result, "color")
+        if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+            return
+        st.session_state[color_key] = color.upper()
+    return _save_color
+
+
+def make_artwork_color_picker_callback(
+    component_key: str,
+    color_key: str,
+    item_id: int,
+    edit_field: str,
+):
+    # Persiste a cor emitida pelo seletor integrado, seja pelo picker ou conta-gotas.
+    def _save_color():
+        result = st.session_state.get(component_key)
+        color = _component_value(result, "color")
+        if not isinstance(color, str) or not re.fullmatch(r"#[0-9A-Fa-f]{6}", color):
+            return
+        color = color.upper()
+        st.session_state[color_key] = color
+        _persist_artwork_fields(int(item_id), (edit_field,))
+    return _save_color
 
 
 @st.cache_resource(show_spinner=False)
-def get_color_eyedropper_component():
-    """Botão de conta-gotas nativo do navegador (EyeDropper API)."""
-    html = '<div class="atomica-eyedropper-root" id="atomica-eyedropper-root"></div>'
-    css = r"""
-    .atomica-eyedropper-root { width:100%; margin:5px 0 2px; font-family:inherit; }
-    .atomica-eyedropper-button {
-      display:inline-flex; align-items:center; justify-content:center; gap:8px;
-      min-height:36px; padding:7px 12px; border:1px solid #507091; border-radius:9px;
-      background:#173653; color:#F4F7FB; font-family:inherit; font-size:13px; font-weight:700; line-height:1.2; cursor:pointer;
-      transition:background .15s,border-color .15s;
+def get_artwork_integrated_color_picker_component():
+    """Usa o seletor nativo do navegador, com conta-gotas no Chromium desktop."""
+    html = r'''<div class="atomica-integrated-color" id="atomica-integrated-color">
+      <input class="atomica-integrated-color-input" id="atomica-integrated-color-input"
+        type="color" value="#FFFFFF" aria-label="Selecionar cor">
+      <span class="atomica-integrated-color-value" id="atomica-integrated-color-value">#FFFFFF</span>
+    </div>'''
+    css = r'''
+    .atomica-integrated-color {
+      display:flex; align-items:center; gap:12px; width:100%; min-height:46px;
+      padding:6px 9px; box-sizing:border-box; border:1px solid #55718E;
+      border-radius:10px; background:rgba(15,34,55,.82); color:#F4F7FB;
+      font-family:inherit;
     }
-    .atomica-eyedropper-button:hover { background:#24517A; border-color:#77B6E8; }
-    .atomica-eyedropper-button:disabled { opacity:.65; cursor:wait; }
-    .atomica-eyedropper-status { display:inline-block; margin-left:9px; color:#9EB1C7; font-size:11px; }
-    """
-    js = r"""
+    .atomica-integrated-color-input {
+      flex:0 0 48px; width:48px; height:34px; padding:2px; cursor:pointer;
+      border:1px solid rgba(255,255,255,.34); border-radius:8px; background:#FFFFFF;
+    }
+    .atomica-integrated-color-value {
+      flex:1; min-width:0; font:700 13px/1.2 ui-monospace,Consolas,monospace;
+      color:#EAF3FC; letter-spacing:.045em;
+    }
+    '''
+    js = r'''
     export default function(component) {
-      const { parentElement, setTriggerValue } = component;
-      let root = parentElement.querySelector('#atomica-eyedropper-root');
+      const { parentElement, data, setTriggerValue } = component;
+      const root = parentElement.querySelector('#atomica-integrated-color');
       if (!root) return;
-      let button = root.querySelector('button');
-      let status = root.querySelector('.atomica-eyedropper-status');
-      if (!button) {
-        button = document.createElement('button');
-        button.type = 'button';
-        button.className = 'atomica-eyedropper-button';
-        button.textContent = '⌖  Conta-gotas: capturar cor da tela';
-        status = document.createElement('span');
-        status.className = 'atomica-eyedropper-status';
-        root.replaceChildren(button, status);
-      }
-      button.onclick = async () => {
-        if (!window.isSecureContext || typeof window.EyeDropper !== 'function') {
-          status.textContent = 'Indisponível neste navegador; use Chrome ou Edge atualizado.';
-          return;
-        }
-        button.disabled = true;
-        status.textContent = 'Clique em qualquer ponto da tela…';
-        try {
-          const result = await new window.EyeDropper().open();
-          const color = String(result.sRGBHex || '').toUpperCase();
-          if (/^#[0-9A-F]{6}$/.test(color)) {
-            setTriggerValue('picked_color', color);
-            status.textContent = `Cor selecionada: ${color}`;
-          } else {
-            status.textContent = 'Não foi possível ler a cor selecionada.';
-          }
-        } catch (error) {
-          status.textContent = error && error.name === 'AbortError'
-            ? 'Seleção cancelada.' : 'Não foi possível capturar a cor.';
-        } finally {
-          button.disabled = false;
-        }
+      const input = root.querySelector('#atomica-integrated-color-input');
+      const value = root.querySelector('#atomica-integrated-color-value');
+      const normalise = raw => {
+        const text = String(raw || '').trim().toUpperCase();
+        return /^#[0-9A-F]{6}$/.test(text) ? text : '#FFFFFF';
       };
+      const sync = raw => {
+        const color = normalise(raw);
+        if (input.value.toUpperCase() !== color) input.value = color;
+        value.textContent = color;
+      };
+      sync(data?.color);
+      if (root.dataset.initialized !== 'true') {
+        // O seletor nativo do Chrome/Edge desktop já oferece conta-gotas
+        // na própria janela de escolha de cor. Não há um segundo botão.
+        input.addEventListener('change', () => {
+          const color = normalise(input.value);
+          sync(color);
+          setTriggerValue('color', color);
+        });
+        root.dataset.initialized = 'true';
+      }
     }
-    """
+    '''
     return st.components.v2.component(
-        "atomica_color_eyedropper", html=html, css=css, js=js
+        "atomica_artwork_integrated_color_picker", html=html, css=css, js=js
     )
-
 
 @st.cache_resource(show_spinner=False)
 def get_sheet_real_size_viewer_component():
@@ -2339,6 +3158,66 @@ def remaining_slots_to_fill(page_capacity: int, total_quantity: int) -> int:
     return capacity - (max(0, int(total_quantity)) % capacity)
 
 
+def _restore_individual_fill_after_cut(edit: dict, prefix: str) -> str:
+    """Restaura o último preenchimento utilizável ao sair do modo Corte."""
+    previous = edit.pop("fit_cut_previous_fill_mode", None)
+    if previous not in {"Cor sólida", "Imagem desfocada"}:
+        previous = "Cor sólida"
+    edit["background_mode"] = previous
+    edit["custom_background_pending"] = False
+    st.session_state[f"{prefix}_background_mode"] = previous
+    st.session_state[f"{prefix}_custom_background_pending"] = False
+    st.session_state.pop("focused_art_png_export", None)
+    st.session_state.pop("pdf", None)
+    st.session_state.pop("_sheet_real_size_preview_cache", None)
+    return previous
+
+
+def _deactivate_individual_fill_for_cut(item_id: int, prefix: str, edit: dict) -> dict:
+    """Desativa todos os preenchimentos incompatíveis com Preencher até o corte.
+
+    O modo interno "Sem preenchimento" não é uma opção do seletor: ele representa
+    que Cor sólida, Desfoque e Fundo personalizado estão inativos enquanto o
+    preset Corte estiver marcado. As cores e a intensidade ficam armazenadas,
+    mas não são aplicadas à prévia, ao PNG, à folha ou ao PDF.
+    """
+    current_mode = str(edit.get("background_mode", "Cor sólida"))
+    previous_mode = edit.get("fit_cut_previous_fill_mode")
+    if current_mode in {"Cor sólida", "Imagem desfocada"}:
+        previous_mode = current_mode
+    elif current_mode == "Fundo personalizado":
+        previous_mode = edit.get("background_image_previous_fill_mode", previous_mode)
+    if previous_mode not in {"Cor sólida", "Imagem desfocada"}:
+        previous_mode = "Cor sólida"
+    edit["fit_cut_previous_fill_mode"] = previous_mode
+
+    has_custom_data = bool(
+        edit.get("custom_background_active")
+        or edit.get("background_image_bytes")
+        or edit.get("background_image_digest")
+        or edit.get("custom_background_pending")
+        or current_mode == "Fundo personalizado"
+    )
+    if has_custom_data:
+        remove_artwork_custom_background(
+            int(item_id), restore_previous_fill_mode=False, commit_transform=False
+        )
+        item = _find_artwork_item(int(item_id))
+        if item is not None:
+            edit = item.setdefault("edit", {})
+
+    edit["custom_background_active"] = False
+    edit["custom_background_pending"] = False
+    edit["background_mode"] = "Sem preenchimento"
+    edit.pop("background_image_previous_fill_mode", None)
+    st.session_state[f"{prefix}_background_mode"] = "Sem preenchimento"
+    st.session_state[f"{prefix}_custom_background_pending"] = False
+    st.session_state.pop("focused_art_png_export", None)
+    st.session_state.pop("pdf", None)
+    st.session_state.pop("_sheet_real_size_preview_cache", None)
+    return edit
+
+
 def _on_fit_mode_changed(
     selected_mode: str,
     selected_key: str,
@@ -2346,20 +3225,20 @@ def _on_fit_mode_changed(
     prefix: str = "global_image",
     item_id: int | None = None,
 ) -> None:
-    """Aplica o preset automático somente à arte selecionada e recentra seu editor."""
-    if not st.session_state.get(selected_key, False):
+    """Aplica o preset individual e resolve os conflitos de fundo da arte."""
+    selected = bool(st.session_state.get(selected_key, False))
+    if not selected:
         # Ao desmarcar o preset, o usuário assume o controle manual do ajuste.
         if item_id is not None:
             item = _find_artwork_item(int(item_id))
             if item is not None:
-                item.setdefault("edit", {})["manual_transform_active"] = True
-        # Ao desmarcar o preset, congela a transformação atual como composição
-        # manual relativa à guia Segurança antes de uma troca futura de tamanho.
-        if item_id is not None:
-            _persist_artwork_fields(int(item_id), ("fit_cut_checked", "fit_art_checked"))
-            item = _find_artwork_item(int(item_id))
-            if item is not None:
                 edit = item.setdefault("edit", {})
+                edit["manual_transform_active"] = True
+                edit["fit_cut_checked"] = False
+                edit["fit_art_checked"] = False
+                if str(edit.get("background_mode", "")) == "Sem preenchimento":
+                    _restore_individual_fill_after_cut(edit, prefix)
+                _persist_artwork_fields(int(item_id), ("fit_cut_checked", "fit_art_checked"))
                 _safety_relative_transform(edit, edit.get("scale_reference_spec"))
         return
 
@@ -2368,7 +3247,19 @@ def _on_fit_mode_changed(
     if item_id is not None:
         item = _find_artwork_item(int(item_id))
         if item is not None:
-            item.setdefault("edit", {})["manual_transform_active"] = False
+            edit = item.setdefault("edit", {})
+            edit["manual_transform_active"] = False
+            edit["fit_basis_mode"] = selected_mode
+            edit["fit_cut_checked"] = selected_mode == "cut"
+            edit["fit_art_checked"] = selected_mode == "art"
+            if selected_mode == "cut":
+                # Corte invalida todos os modos de preenchimento/fundo, tal como
+                # no Ajuste em Lote. As cores ficam guardadas, mas não ativas.
+                edit = _deactivate_individual_fill_for_cut(int(item_id), prefix, edit)
+            elif str(edit.get("background_mode", "")) == "Sem preenchimento":
+                # Ao voltar para a área da arte, restaura o último tipo de
+                # preenchimento válido (nunca uma imagem personalizada removida).
+                _restore_individual_fill_after_cut(edit, prefix)
     st.session_state[f"{prefix}_zoom"] = 1.0
     st.session_state[f"{prefix}_offset_x"] = 0.0
     st.session_state[f"{prefix}_offset_y"] = 0.0
@@ -2389,30 +3280,268 @@ def _on_fit_mode_changed(
         )
 
 
-def render_fit_mode_controls(prefix: str = "global_image", item_id: int | None = None) -> str:
-    """Mostra presets mutuamente exclusivos com estado independente por arte."""
+def _toggle_touch_checkbox_state(state_key: str, callback=None, callback_args=()) -> None:
+    """Alterna uma opção booleana por botão nativo, confiável em telas touch."""
+    st.session_state[state_key] = not bool(st.session_state.get(state_key, False))
+    if callable(callback):
+        callback(*(callback_args or ()))
+
+
+def render_touch_checkbox(
+    label: str,
+    *,
+    key: str,
+    value: bool = False,
+    on_change=None,
+    args=(),
+    help: str | None = None,
+    disabled: bool = False,
+) -> bool:
+    """Renderiza uma caixa de seleção visual usando um botão Streamlit.
+
+    Em alguns navegadores móveis, os checkboxes nativos não recebem o toque
+    corretamente quando a página combina CSS responsivo, componentes React
+    e interações por pointer. O botão preserva a semântica visual de seleção,
+    mantém o estado em session_state e usa o mesmo caminho de clique dos demais
+    botões que já funcionam em celulares/tablets.
+    """
+    st.session_state.setdefault(key, bool(value))
+    checked = bool(st.session_state.get(key, False))
+    marker = "☑" if checked else "☐"
+    safe_key = re.sub(r"[^a-zA-Z0-9_-]+", "_", str(key))
+    with st.container(key=f"touch_checkbox_{safe_key}"):
+        st.button(
+            f"{marker}  {label}",
+            key=f"touch_checkbox_button_{safe_key}",
+            type="secondary",
+            use_container_width=True,
+            disabled=disabled,
+            help=help,
+            on_click=_toggle_touch_checkbox_state,
+            args=(key, on_change, tuple(args or ())),
+        )
+    return checked
+
+
+def render_fit_mode_controls(
+    prefix: str = "global_image", item_id: int | None = None
+) -> str:
+    """Mostra presets mutuamente exclusivos, sempre editáveis por arte."""
     cut_key = f"{prefix}_fit_cut_checked"
     art_key = f"{prefix}_fit_art_checked"
     basis_key = f"{prefix}_fit_basis_mode"
     st.session_state.setdefault(cut_key, st.session_state.get(basis_key, "cut") == "cut")
     st.session_state.setdefault(art_key, st.session_state.get(basis_key, "cut") == "art")
     st.session_state.setdefault(basis_key, "art" if st.session_state.get(art_key) else "cut")
-    st.checkbox(
+    render_touch_checkbox(
         "Preencher até o corte",
         key=cut_key,
         on_change=_on_fit_mode_changed,
         args=("cut", cut_key, art_key, prefix, item_id),
-        help="Aumenta a arte proporcionalmente até cobrir a guia de corte e centraliza o enquadramento.",
+        help="Usa a guia Corte como referência de escala. Com um fundo de borda ativo, a imagem principal continua visível somente até a guia Arte.",
     )
-    st.checkbox(
+    render_touch_checkbox(
         "Encaixar na área da arte",
         key=art_key,
         on_change=_on_fit_mode_changed,
         args=("art", art_key, cut_key, prefix, item_id),
         help="Redimensiona para caber integralmente na guia da arte e centraliza o enquadramento.",
     )
-    st.caption("Todas as imagens começam com ‘Preencher até o corte’ ativado. Você pode desmarcar o preset e ajustar o enquadramento manualmente; cada arte salva seus próprios ajustes.")
+    st.caption("Você pode alterar o enquadramento com os presets, arrastar a imagem ou usar as alças de zoom. Cada arte mantém seus próprios ajustes.")
     return str(st.session_state.get(basis_key, "cut"))
+
+
+def _activate_art_area_preserving_manual_transform(item_id: int, prefix: str) -> None:
+    """Mostra o preenchimento fora da arte sem descartar zoom/posição manuais.
+
+    Os fundos decorativos ocupam a guia Corte e, por isso, a imagem principal
+    precisa ser recortada pela guia Arte. Quando a composição já é manual,
+    convertemos somente a base geométrica (Corte -> Arte), preservando o tamanho
+    físico e o deslocamento atuais. Um preset explícito continua podendo recentrar.
+    """
+    item = _find_artwork_item(int(item_id))
+    if item is None:
+        return
+
+    # Captura o último gesto/zoom do canvas antes de alterar a base geométrica.
+    try:
+        _commit_artwork_editor_state(int(item_id))
+    except (NameError, TypeError, ValueError, KeyError):
+        pass
+
+    item = _find_artwork_item(int(item_id)) or item
+    edit = item.setdefault("edit", {})
+    cut_key = f"{prefix}_fit_cut_checked"
+    art_key = f"{prefix}_fit_art_checked"
+    basis_key = f"{prefix}_fit_basis_mode"
+    zoom_key = f"{prefix}_zoom"
+    x_key = f"{prefix}_offset_x"
+    y_key = f"{prefix}_offset_y"
+    revision_key = f"{prefix}_transform_revision"
+
+    cut_checked = bool(st.session_state.get(cut_key, edit.get("fit_cut_checked", False)))
+    art_checked = bool(st.session_state.get(art_key, edit.get("fit_art_checked", False)))
+    manual = bool(edit.get("manual_transform_active", False)) or not (cut_checked or art_checked)
+    current_mode = str(edit.get("fit_basis_mode", st.session_state.get(basis_key, "cut"))).lower()
+    if current_mode not in {"cut", "art"}:
+        current_mode = "cut"
+
+    spec = BUTTONS.get(str(st.session_state.get("single_size")))
+    profile = edit.get("scale_reference_spec")
+    if not isinstance(profile, dict):
+        profile = _button_scale_profile(spec) if spec is not None else None
+    try:
+        cut_diameter = float(profile["cut"])
+        art_diameter = float(profile["art"])
+        safe_diameter = float(profile["safe"])
+        profile_valid = all(
+            math.isfinite(value) and value > 0
+            for value in (cut_diameter, art_diameter, safe_diameter)
+        )
+    except (KeyError, TypeError, ValueError):
+        profile_valid = False
+
+    if manual:
+        # Em composição manual, trocar a área de recorte não deve mexer na
+        # escala física nem na posição da imagem. Como o zoom é relativo à guia
+        # ativa, convertemos a razão Corte/Arte e mantemos X/Y em milímetros.
+        zoom = float(st.session_state.get(zoom_key, edit.get("zoom", 1.0)))
+        off_x = float(st.session_state.get(x_key, edit.get("offset_x", 0.0)))
+        off_y = float(st.session_state.get(y_key, edit.get("offset_y", 0.0)))
+        if current_mode != "art" and profile_valid:
+            # O modo Corte usa min(largura, altura) como base; o modo Arte
+            # usa max(largura, altura). Considerar também a proporção da imagem
+            # é essencial para preservar a dimensão física em artes retangulares.
+            try:
+                image_width, image_height = get_image_dimensions(
+                    str(item.get("image_digest", "")), item.get("image", b"")
+                )
+                old_image_basis = float(min(image_width, image_height))
+                new_image_basis = float(max(image_width, image_height))
+                if old_image_basis > 0 and new_image_basis > 0:
+                    old_scale_per_zoom = cut_diameter / old_image_basis
+                    new_scale_per_zoom = art_diameter / new_image_basis
+                    zoom *= old_scale_per_zoom / new_scale_per_zoom
+                else:
+                    zoom *= cut_diameter / art_diameter
+            except Exception:
+                zoom *= cut_diameter / art_diameter
+        zoom = max(0.01, min(20.0, zoom))
+        off_x = max(-5000.0, min(5000.0, off_x))
+        off_y = max(-5000.0, min(5000.0, off_y))
+
+        edit["fit_basis_mode"] = "art"
+        edit["fit_cut_checked"] = False
+        edit["fit_art_checked"] = False
+        edit["manual_transform_active"] = True
+        edit["zoom"] = zoom
+        edit["offset_x"] = off_x
+        edit["offset_y"] = off_y
+        edit["transform_revision"] = int(
+            st.session_state.get(revision_key, edit.get("transform_revision", 0)) or 0
+        ) + (1 if current_mode != "art" else 0)
+        if profile_valid:
+            edit["scale_reference_spec"] = profile
+            edit["scale_reference_diameter"] = safe_diameter
+            _safety_relative_transform(edit, profile)
+
+        st.session_state[cut_key] = False
+        st.session_state[art_key] = False
+        st.session_state[basis_key] = "art"
+        st.session_state[zoom_key] = zoom
+        st.session_state[x_key] = off_x
+        st.session_state[y_key] = off_y
+        st.session_state[revision_key] = edit["transform_revision"]
+        _persist_artwork_fields(
+            int(item_id),
+            ("fit_basis_mode", "fit_cut_checked", "fit_art_checked", "manual_transform_active",
+             "zoom", "offset_x", "offset_y", "transform_revision"),
+        )
+        return
+
+    # Se havia um preset ativo, o preenchimento decorativo exige o preset Arte.
+    # Nesse caso o recentramento é intencional: o usuário ainda não personalizou
+    # a posição manualmente. Se Arte já era o preset, não há nada a alterar.
+    if not (art_checked and not cut_checked and current_mode == "art"):
+        st.session_state[art_key] = True
+        st.session_state[cut_key] = False
+        _on_fit_mode_changed("art", art_key, cut_key, prefix, int(item_id))
+
+
+def make_artwork_background_mode_callback(item_id: int, prefix: str):
+    """Alterna entre Cor sólida, Desfoque e Fundo personalizado na arte individual.
+
+    O fundo personalizado é uma opção real do seletor, mesmo antes do upload.
+    Seus controles aparecem somente quando esse modo está ativo; o modo de
+    preenchimento anterior fica guardado para ser restaurado ao remover a imagem.
+    A troca de preenchimento nunca descarta zoom/posição ajustados manualmente.
+    """
+    def _apply_mode():
+        mode_key = f"{prefix}_background_mode"
+        selected_mode = str(st.session_state.get(mode_key, "Cor sólida"))
+        valid_modes = {"Cor sólida", "Imagem desfocada", "Fundo personalizado"}
+        if selected_mode not in valid_modes:
+            selected_mode = "Cor sólida"
+            st.session_state[mode_key] = selected_mode
+
+        item = _find_artwork_item(int(item_id))
+        if item is None:
+            return
+        edit = item.setdefault("edit", {})
+        has_custom_layer = bool(_custom_background_payload(edit)[0])
+        was_custom_selected = str(edit.get("background_mode", "Cor sólida")) == "Fundo personalizado"
+
+        if selected_mode == "Fundo personalizado":
+            edit.pop("fit_cut_previous_fill_mode", None)
+            # Guardar o preenchimento que deverá voltar quando a camada for
+            # removida. Se o modo personalizado já estava ativo/pendente,
+            # preservar o modo anterior em vez de gravar "Fundo personalizado".
+            previous_mode = edit.get("background_image_previous_fill_mode")
+            if previous_mode not in {"Cor sólida", "Imagem desfocada"}:
+                current_mode = str(edit.get("background_mode", "Cor sólida"))
+                previous_mode = current_mode if current_mode in {"Cor sólida", "Imagem desfocada"} else "Cor sólida"
+                edit["background_image_previous_fill_mode"] = previous_mode
+
+            edit["background_mode"] = "Fundo personalizado"
+            edit["custom_background_pending"] = not has_custom_layer
+            st.session_state[f"{prefix}_custom_background_pending"] = not has_custom_layer
+            _persist_artwork_fields(
+                int(item_id),
+                ("background_mode", "custom_background_pending", "background_image_previous_fill_mode"),
+            )
+
+        else:
+            # Uma nova escolha explícita de preenchimento passa a ser a última
+            # preferência; não reutilizar um marcador antigo do preset Corte.
+            edit.pop("fit_cut_previous_fill_mode", None)
+            # Cor sólida/Desfoque substituem tanto uma camada já carregada
+            # quanto uma seleção de Fundo Personalizado ainda sem upload.
+            if (
+                has_custom_layer
+                or edit.get("custom_background_active")
+                or edit.get("background_image_bytes")
+                or edit.get("custom_background_pending")
+                or was_custom_selected
+            ):
+                remove_artwork_custom_background(
+                    int(item_id), restore_previous_fill_mode=False, commit_transform=False
+                )
+                item = _find_artwork_item(int(item_id)) or item
+                edit = item.setdefault("edit", {})
+
+            edit["custom_background_pending"] = False
+            st.session_state[f"{prefix}_custom_background_pending"] = False
+            edit.pop("background_image_previous_fill_mode", None)
+            edit["background_mode"] = selected_mode
+            st.session_state[mode_key] = selected_mode
+            _persist_artwork_fields(int(item_id), ("background_mode", "custom_background_pending"))
+
+        # Qualquer preenchimento fica visível fora da arte principal somente
+        # com a guia Arte como limite. A troca da base geométrica preserva uma
+        # composição manual já ajustada pelo usuário.
+        _activate_art_area_preserving_manual_transform(int(item_id), prefix)
+
+    return _apply_mode
 
 
 def make_image_editor_sync_callback(
@@ -2471,6 +3600,29 @@ def _on_pool_selected_art_change() -> None:
     # O novo selected_id é aplicado pelo retorno do componente no fluxo principal.
 
 
+def _navigate_editor_artwork(offset: int) -> None:
+    """Move a prévia para a arte anterior/próxima na ordem atual do Pool."""
+    items = st.session_state.get("artwork_items", [])
+    if len(items) < 2:
+        return
+    try:
+        current_id = int(st.session_state.get("artwork_selected_id"))
+    except (TypeError, ValueError):
+        current_id = int(items[0]["id"])
+    positions = {int(item["id"]): index for index, item in enumerate(items)}
+    current_index = positions.get(current_id, 0)
+    target_index = max(0, min(len(items) - 1, current_index + int(offset)))
+    if target_index == current_index:
+        return
+    # Confirma zoom/posição do canvas antes de trocar a arte em foco.
+    _commit_artwork_editor_state(current_id)
+    target_id = int(items[target_index]["id"])
+    st.session_state["artwork_selected_id"] = target_id
+    # O estado salvo do componente de Pool pode conter a seleção anterior.
+    # Este marcador impede que ela sobreponha a navegação neste rerun.
+    st.session_state["_editor_navigation_target_id"] = target_id
+
+
 def _commit_selected_artwork_before_size_change() -> None:
     """Salva o último arraste/zoom antes de converter a arte para outro botton."""
     selected_id = st.session_state.get("artwork_selected_id")
@@ -2495,31 +3647,24 @@ def current_editor_transform(component_key: str, token: str, prefix: str) -> dic
 
 
 def render_guide_legend() -> None:
-    """Legenda vertical das guias, usada ao lado da prévia ou abaixo do editor."""
+    """Legenda horizontal e compacta para ficar junto da prévia."""
     guide_rows = [
-        ("#E5457B", "dashed", "Corte", "Limite externo do papel e área de sangria."),
-        ("#FFFF00", "dashed", "Dobra", "Linha onde a matriz dobra o papel."),
-        ("#2F9BD8", "solid", "Arte", "Área visível da imagem no botton pronto."),
-        ("#00F919", "dashed", "Segurança", "Mantenha textos e detalhes importantes dentro desta área."),
+        ("#E5457B", "dashed", "Corte", "Limite externo e sangria"),
+        ("#FFFF00", "dashed", "Dobra", "Linha de dobra da matriz"),
+        ("#2F9BD8", "solid", "Arte", "Área visível do botton"),
+        ("#00F919", "dashed", "Segurança", "Área de textos e detalhes"),
     ]
     rows = []
     for color, style, label, description in guide_rows:
         rows.append(
-            "<div style='display:flex;gap:11px;align-items:flex-start;padding:12px 10px;"
-            "border-bottom:1px solid rgba(120,150,185,.18);'>"
-            f"<span style='display:block;flex:0 0 34px;margin-top:8px;border-top:3px {style} {color};'></span>"
-            "<div style='min-width:0;'>"
-            f"<div style='font-size:13px;font-weight:750;color:#F4F7FB;'>{label}</div>"
-            f"<div style='font-size:11px;line-height:1.45;color:#AFC0D4;margin-top:3px;'>{description}</div>"
-            "</div></div>"
+            f'<div class="guide-compact-item" title="{description}">'
+            f'<span class="guide-compact-line" style="border-top-style:{style};border-top-color:{color};"></span>'
+            f'<span class="guide-compact-label">{label}</span>'
+            f'<span class="guide-compact-description">{description}</span>'
+            '</div>'
         )
-    html = (
-        "<div style='border:1px solid #29415F;border-radius:13px;background:#0B1B30;"
-        "overflow:hidden;width:100%;box-sizing:border-box;'>"
-        + "".join(rows)
-        + "</div>"
-    )
-    st.markdown(html, unsafe_allow_html=True)
+    st.markdown('<div class="guide-compact-legend">' + ''.join(rows) + '</div>', unsafe_allow_html=True)
+
 
 
 @st.cache_resource(show_spinner=False)
@@ -2584,13 +3729,27 @@ def get_image_editor_component():
     @media (max-width:760px) {
       .atomica-guide-legend { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
-    @media (max-width:560px) {
-      .atomica-editor-stage { padding:6px; }
-      .atomica-editor-toolbar { gap:6px; }
-      .atomica-editor-toolbar button { min-height:35px; padding:6px 9px; }
+    @media (max-height:850px) and (min-width:901px) {
+      .atomica-editor-root, .atomica-editor-stage { max-width:540px; }
+      .atomica-editor-canvas { max-width:510px; }
+    }
+    @media (max-width:760px) {
+      .atomica-editor-root, .atomica-editor-stage { width:100%; max-width:100%; min-width:0; }
+      .atomica-editor-stage { padding:7px; border-radius:12px; }
+      .atomica-editor-canvas { width:100%; max-width:100%; border-radius:8px; touch-action:none; }
+      .atomica-editor-toolbar { gap:7px; padding:9px 2px 2px; }
+      .atomica-editor-toolbar button { min-width:46px; min-height:46px; padding:9px 12px; touch-action:manipulation; }
+      .atomica-editor-zoom { min-width:70px; min-height:40px; display:flex; align-items:center; justify-content:center; }
+      .atomica-editor-hint { font-size:12px; line-height:1.55; padding:9px 4px 0; }
       .atomica-guide-legend { gap:8px; padding:9px; }
       .atomica-guide-item { grid-template-columns:26px 1fr; gap:5px; }
       .atomica-guide-line { width:23px; }
+    }
+    @media (max-width:420px) {
+      .atomica-editor-toolbar { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:6px; }
+      .atomica-editor-toolbar button { min-width:0; width:100%; min-height:48px; padding:8px 5px; font-size:14px; }
+      .atomica-editor-zoom { grid-column:span 4; min-height:32px; }
+      .atomica-guide-legend { grid-template-columns:repeat(2,minmax(0,1fr)); }
     }
     """
     js = r"""
@@ -2634,14 +3793,20 @@ def get_image_editor_component():
           setStateValue: null,
           image: new Image(),
           backdropImage: new Image(),
+          customBackgroundImage: new Image(),
+          customBackgroundRevision: -1,
           imageReady: false,
           backdropReady: false,
+          customBackgroundReady: false,
           imageSrc: '',
           backdropSrc: '',
+          customBackgroundSrc: '',
           blurCanvas: null,
           blurCanvasSignature: null,
           lastDrawSignature: null,
           activeDrag: null,
+          activePointers: new Map(),
+          pinchGesture: null,
           wheelTimer: null,
           drawFrame: null,
           fixedView: null,
@@ -2650,7 +3815,12 @@ def get_image_editor_component():
           nodes: []
         };
         const side = 1000;
-        const handleRadius = 17;
+        function getHandleRadius() {
+          const renderedWidth = Math.max(1, canvas.getBoundingClientRect().width || 580);
+          // Em telefones/tablets, 10–12 CSS px de raio mantém as alças fáceis
+          // de tocar, sem alterar a escala física exportada da arte.
+          return clamp((11 * side) / renderedWidth, 17, 40);
+        }
 
         rootElement.replaceChildren();
         const stage = document.createElement('div');
@@ -2693,6 +3863,7 @@ def get_image_editor_component():
           ) + 1;
           instance.state.event_seq = instance.eventSequence;
           const cfg = getCfg();
+          const effectiveFitMode = activeFitMode();
           const payload = {
             token: instance.token,
             zoom: Number(instance.state.zoom.toFixed(5)),
@@ -2711,9 +3882,9 @@ def get_image_editor_component():
               safe: Number(cfg.safe),
               shape: String(cfg.shape || 'circle')
             },
-            fit_mode: String(cfg.fit_mode || 'cut'),
+            fit_mode: effectiveFitMode,
             safety_relative: {
-              zoom: Number((instance.state.zoom * ((cfg.fit_mode || 'cut') === 'art' ? Number(cfg.art) : Number(cfg.cut)) / Math.max(1e-9, Number(cfg.safe))).toFixed(8)),
+              zoom: Number((instance.state.zoom * (effectiveFitMode === 'art' ? Number(cfg.art) : Number(cfg.cut)) / Math.max(1e-9, Number(cfg.safe))).toFixed(8)),
               offset_x: Number((instance.state.off_x / Math.max(1e-9, Number(cfg.safe))).toFixed(8)),
               offset_y: Number((instance.state.off_y / Math.max(1e-9, Number(cfg.safe))).toFixed(8))
             },
@@ -2740,18 +3911,18 @@ def get_image_editor_component():
         }
         instance.finishChange = finishChange;
 
-        makeButton('−', 'Diminuir o zoom em exatamente 1 ponto percentual', '', () => {
+        makeButton('−', 'Diminuir o zoom em 1 ponto percentual', '', () => {
           const currentPercent = Math.round(instance.state.zoom * 100);
           instance.state.zoom = clamp((currentPercent - 1) / 100, 0.01, 20);
           finishChange();
         });
         toolbar.appendChild(status);
-        makeButton('+', 'Aumentar o zoom em exatamente 1 ponto percentual', '', () => {
+        makeButton('+', 'Aumentar o zoom em 1 ponto percentual', '', () => {
           const currentPercent = Math.round(instance.state.zoom * 100);
           instance.state.zoom = clamp((currentPercent + 1) / 100, 0.01, 20);
           finishChange();
         });
-        makeButton('Centralizar', 'Centralizar a arte sem alterar seu tamanho', 'primary', () => {
+        makeButton('Centralizar', 'Centraliza a arte sem alterar seu tamanho', 'primary', () => {
           instance.state.off_x = 0;
           instance.state.off_y = 0;
           finishChange();
@@ -2767,10 +3938,16 @@ def get_image_editor_component():
 
         const hint = document.createElement('div');
         hint.className = 'atomica-editor-hint';
-        hint.textContent = 'Arraste o interior da arte para mover · use as quatro alças dos cantos para redimensionar proporcionalmente · use + e − para ajustes finos.';
+        hint.textContent = 'Arraste a imagem para mover · use as alças dos cantos para redimensionar · no celular, faça o gesto de pinça com dois dedos para aproximar ou afastar · use + e − para ajustes finos.';
         rootElement.appendChild(hint);
 
         function getCfg() { return instance.cfg || {}; }
+        function activeFitMode() {
+          const cfg = getCfg();
+          // A imagem de fundo é uma camada separada e não altera o preset nem
+          // a transformação da arte principal.
+          return cfg.fit_mode || 'cut';
+        }
         function sourceBasis(fit, sourceImage) {
           return fit ? Math.max(sourceImage.naturalWidth, sourceImage.naturalHeight)
                      : Math.min(sourceImage.naturalWidth, sourceImage.naturalHeight);
@@ -2788,7 +3965,7 @@ def get_image_editor_component():
         function getView() {
           const cfg = getCfg();
           const signature = [
-            cfg.token, cfg.shape, cfg.cut, cfg.art, cfg.fit_mode,
+            cfg.token, cfg.shape, cfg.cut, cfg.art, activeFitMode(),
             instance.image.naturalWidth, instance.image.naturalHeight
           ].join('|');
           if (instance.fixedView && instance.fixedViewSignature === signature) return instance.fixedView;
@@ -2891,7 +4068,8 @@ def get_image_editor_component():
         function getHandles(rect) {
           // Mantém as alças na área clicável mesmo quando os limites da imagem
           // ficam fora do canvas (comum em artes retangulares no modo Preencher).
-          const inset = handleRadius + 5;
+          const radius = getHandleRadius();
+          const inset = radius + 5;
           const visible = value => clamp(value, inset, side - inset);
           return [
             {sx:-1, sy:-1, x:visible(rect.x), y:visible(rect.y), rawX:rect.x, rawY:rect.y},
@@ -2907,8 +4085,9 @@ def get_image_editor_component():
           ctx.setLineDash([8,5]);
           ctx.strokeRect(rect.x, rect.y, rect.w, rect.h);
           ctx.setLineDash([]);
+          const radius = getHandleRadius();
           getHandles(rect).forEach(handle => {
-            ctx.beginPath(); ctx.arc(handle.x, handle.y, handleRadius, 0, Math.PI*2);
+            ctx.beginPath(); ctx.arc(handle.x, handle.y, radius, 0, Math.PI*2);
             ctx.fillStyle = '#FFFFFF'; ctx.fill();
             ctx.lineWidth = 4; ctx.strokeStyle = '#12AFC8'; ctx.stroke();
             ctx.beginPath(); ctx.arc(handle.x, handle.y, 3, 0, Math.PI*2);
@@ -2927,19 +4106,30 @@ def get_image_editor_component():
           ctx.clip();
           ctx.fillStyle = cfg.bg || '#FFFFFF';
           ctx.fillRect(0,0,side,side);
-          const fitMode = cfg.fit_mode || 'cut';
-          if ((cfg.background_mode || 'color') === 'blur') {
+          if (instance.customBackgroundReady) {
+            // O fundo personalizado ocupa toda a guia Corte; a arte principal
+            // será composta em seguida, limitada à guia Arte.
+            const backgroundRect = getRect(
+              view, false, {zoom:1, off_x:0, off_y:0}, instance.customBackgroundImage
+            );
+            ctx.drawImage(
+              instance.customBackgroundImage,
+              backgroundRect.x, backgroundRect.y, backgroundRect.w, backgroundRect.h
+            );
+          } else if ((cfg.background_mode || 'color') === 'blur') {
             // O fundo desfocado é pré-renderizado uma vez por imagem/cor/raio;
             // durante arraste e zoom apenas copiamos a camada pronta ao canvas.
             const blurredBackdrop = ensureBlurBackdrop(view);
             if (blurredBackdrop) ctx.drawImage(blurredBackdrop, 0, 0);
           }
           let selectedRect;
-          if (fitMode === 'art') {
+          if (activeFitMode() === 'art' || instance.customBackgroundReady) {
+            // A borda personalizada fica visível no anel Arte–Corte, mas a
+            // escala e o zoom da arte principal continuam sob controle do usuário.
             ctx.save();
             shapePath(ctx, Number(cfg.art)||Number(cfg.cut)||1, view);
             ctx.clip();
-            selectedRect = drawImagePlaced(view, true);
+            selectedRect = drawImagePlaced(view, activeFitMode() === 'art');
             ctx.restore();
           } else {
             selectedRect = drawImagePlaced(view, false);
@@ -2961,15 +4151,132 @@ def get_image_editor_component():
             y:(event.clientY-rect.top)*side/Math.max(1,rect.height)
           };
         }
-        function hitHandle(point, rect) {
+        function hitHandle(point, rect, pointerType='mouse') {
+          const visualRadius = getHandleRadius();
+          const canvasWidth = Math.max(1, canvas.getBoundingClientRect().width || 580);
+          // No touch, o alvo efetivo tem pelo menos 26 CSS px de raio. Isso
+          // evita exigir precisão de mouse para alcançar as alças em celulares.
+          const touchHitRadius = 26 * side / canvasWidth;
+          const hitRadius = pointerType === 'touch'
+            ? Math.max(visualRadius * 2.0, touchHitRadius)
+            : visualRadius * 2.0;
           for (const handle of getHandles(rect)) {
-            if (Math.hypot(point.x-handle.x, point.y-handle.y) <= handleRadius*2.0) return handle;
+            if (Math.hypot(point.x-handle.x, point.y-handle.y) <= hitRadius) return handle;
           }
           return null;
         }
         function pointInsideRect(point, rect) {
           return point.x>=rect.x && point.x<=rect.x+rect.w &&
                  point.y>=rect.y && point.y<=rect.y+rect.h;
+        }
+        function setCanvasPointerCapture(event) {
+          // Eventos sintéticos de testes e alguns navegadores podem recusar a
+          // captura; os eventos normais continuam sendo tratados pelo canvas.
+          try {
+            if (typeof canvas.setPointerCapture === 'function') {
+              canvas.setPointerCapture(event.pointerId);
+            }
+          } catch (_) { /* captura não disponível para este evento */ }
+        }
+        function touchPointerEntries() {
+          return [...instance.activePointers.entries()].filter(([, pointer]) => pointer.type === 'touch');
+        }
+        function startPinchGesture() {
+          const pointers = touchPointerEntries();
+          if (pointers.length < 2) return false;
+          const [first, second] = pointers.slice(0, 2);
+          const a = first[1], b = second[1];
+          const midpoint = {x:(a.x+b.x)/2, y:(a.y+b.y)/2};
+          const distance = Math.max(1, Math.hypot(b.x-a.x, b.y-a.y));
+          const view = getView();
+          instance.pinchGesture = {
+            pointerIds: [first[0], second[0]],
+            startDistance: distance,
+            startMidpoint: midpoint,
+            startZoom: instance.state.zoom,
+            startCenterX: side/2 + instance.state.off_x*view.ppm,
+            startCenterY: side/2 - instance.state.off_y*view.ppm,
+            ppm: view.ppm,
+            changed: false
+          };
+          instance.activeDrag = null;
+          canvas.classList.remove('moving', 'resizing');
+          return true;
+        }
+        function applyPinchGesture() {
+          const gesture = instance.pinchGesture;
+          if (!gesture) return false;
+          const first = instance.activePointers.get(gesture.pointerIds[0]);
+          const second = instance.activePointers.get(gesture.pointerIds[1]);
+          if (!first || !second) return false;
+          const midpoint = {x:(first.x+second.x)/2, y:(first.y+second.y)/2};
+          const distance = Math.max(1, Math.hypot(second.x-first.x, second.y-first.y));
+          const rawFactor = distance / gesture.startDistance;
+          instance.state.zoom = clamp(gesture.startZoom * rawFactor, 0.01, 20);
+          const actualFactor = instance.state.zoom / Math.max(0.000001, gesture.startZoom);
+          // Mantém o ponto da imagem que estava sob o centro dos dedos; ao
+          // mesmo tempo, o deslocamento do centro da pinça produz pan natural.
+          const nextCenterX = midpoint.x + (gesture.startCenterX-gesture.startMidpoint.x)*actualFactor;
+          const nextCenterY = midpoint.y + (gesture.startCenterY-gesture.startMidpoint.y)*actualFactor;
+          instance.state.off_x = (nextCenterX-side/2)/gesture.ppm;
+          instance.state.off_y = (side/2-nextCenterY)/gesture.ppm;
+          gesture.changed = true;
+          redraw();
+          updateStatus();
+          return true;
+        }
+        function beginOneFingerPan(pointerId, pointer) {
+          const view = getView();
+          const rect = getRect(view, activeFitMode()==='art');
+          instance.activeDrag = {
+            mode: 'move', pointerId, view, rect,
+            startPoint: {x:pointer.x, y:pointer.y},
+            startZoom: instance.state.zoom,
+            startX: instance.state.off_x,
+            startY: instance.state.off_y
+          };
+          canvas.classList.add('moving');
+          canvas.classList.remove('resizing');
+        }
+        function endSingleDrag() {
+          if (!instance.activeDrag) return;
+          instance.activeDrag = null;
+          canvas.classList.remove('moving','resizing');
+          draw(); updateStatus(); publish();
+        }
+        function finishTouchPointer(event) {
+          const wasTrackedTouch = instance.activePointers.has(event.pointerId);
+          if (!wasTrackedTouch) {
+            if (instance.activeDrag && instance.activeDrag.pointerId === event.pointerId) endSingleDrag();
+            return;
+          }
+          instance.activePointers.delete(event.pointerId);
+          if (instance.pinchGesture) {
+            const gestureChanged = instance.pinchGesture.changed;
+            instance.pinchGesture = null;
+            const remaining = touchPointerEntries();
+            if (remaining.length >= 2) {
+              // Se um dedo sair de uma pinça com três toques, inicia outra pinça
+              // com os dois ponteiros restantes, sem congelar a edição.
+              startPinchGesture();
+              if (instance.pinchGesture) instance.pinchGesture.changed = gestureChanged;
+              return;
+            }
+            if (remaining.length === 1) {
+              // Ao soltar um dedo, o restante pode continuar arrastando a imagem
+              // sem interromper o gesto ou exigir um novo toque.
+              beginOneFingerPan(remaining[0][0], remaining[0][1]);
+              return;
+            }
+            instance.activeDrag = null;
+            canvas.classList.remove('moving','resizing');
+            draw(); updateStatus();
+            if (gestureChanged) publish();
+            return;
+          }
+          if (instance.activeDrag && instance.activeDrag.pointerId === event.pointerId) {
+            endSingleDrag();
+          }
         }
 
         instance.image.onload = () => {
@@ -2987,26 +4294,44 @@ def get_image_editor_component():
 
         canvas.addEventListener('pointerdown', event => {
           if (!instance.imageReady) return;
-          const cfg = getCfg();
-          const view = getView();
-          const rect = getRect(view, (cfg.fit_mode||'cut')==='art');
           const point = canvasPoint(event);
-          const handle = hitHandle(point, rect);
+          const isTouch = event.pointerType === 'touch';
+          if (isTouch) {
+            instance.activePointers.set(event.pointerId, {x:point.x, y:point.y, type:'touch'});
+            setCanvasPointerCapture(event);
+            if (touchPointerEntries().length >= 2) {
+              if (!instance.pinchGesture) startPinchGesture();
+              event.preventDefault();
+              return;
+            }
+          }
+          const view = getView();
+          const rect = getRect(view, activeFitMode()==='art');
+          const handle = hitHandle(point, rect, isTouch ? 'touch' : 'mouse');
           const mode = handle ? 'resize' : (pointInsideRect(point, rect) ? 'move' : null);
           if (!mode) return;
           instance.activeDrag = {
-            mode, handle, view, rect, startPoint:point,
+            mode, handle, pointerId:event.pointerId, view, rect, startPoint:point,
             startZoom:instance.state.zoom,
             startX:instance.state.off_x,
             startY:instance.state.off_y
           };
           canvas.classList.toggle('moving', mode==='move');
           canvas.classList.toggle('resizing', mode==='resize');
-          canvas.setPointerCapture(event.pointerId);
+          if (!isTouch) setCanvasPointerCapture(event);
           event.preventDefault();
         });
         canvas.addEventListener('pointermove', event => {
-          if (!instance.activeDrag) return;
+          if (instance.activePointers.has(event.pointerId)) {
+            const point = canvasPoint(event);
+            instance.activePointers.set(event.pointerId, {x:point.x, y:point.y, type:'touch'});
+            if (instance.pinchGesture) {
+              applyPinchGesture();
+              event.preventDefault();
+              return;
+            }
+          }
+          if (!instance.activeDrag || instance.activeDrag.pointerId !== event.pointerId) return;
           const drag = instance.activeDrag;
           const point = canvasPoint(event);
           if (drag.mode === 'move') {
@@ -3023,10 +4348,7 @@ def get_image_editor_component():
             // A alça visual pode estar encostada na borda do canvas, enquanto
             // o canto real da imagem está fora dele. Usamos o canto real como
             // referência e aplicamos somente o deslocamento feito pelo usuário.
-            const startVector = {
-              x:h.rawX-pivot.x,
-              y:h.rawY-pivot.y
-            };
+            const startVector = {x:h.rawX-pivot.x, y:h.rawY-pivot.y};
             const currentVector = {
               x:h.rawX + (point.x-drag.startPoint.x) - pivot.x,
               y:h.rawY + (point.y-drag.startPoint.y) - pivot.y
@@ -3046,14 +4368,11 @@ def get_image_editor_component():
           redraw();
           event.preventDefault();
         });
-        function endDrag() {
-          if (!instance.activeDrag) return;
-          instance.activeDrag = null;
-          canvas.classList.remove('moving','resizing');
-          draw(); updateStatus(); publish();
+        function releasePointer(event) {
+          finishTouchPointer(event);
         }
-        canvas.addEventListener('pointerup', endDrag);
-        canvas.addEventListener('pointercancel', endDrag);
+        canvas.addEventListener('pointerup', releasePointer);
+        canvas.addEventListener('pointercancel', releasePointer);
         canvas.addEventListener('wheel', event => {
           if (!instance.imageReady || instance.activeDrag) return;
           event.preventDefault();
@@ -3120,6 +4439,8 @@ def get_image_editor_component():
         instance.state = incomingTransform;
         instance.eventSequence = Number(incomingTransform.event_seq) || 0;
         instance.activeDrag = null;
+        instance.activePointers.clear();
+        instance.pinchGesture = null;
         instance.fixedView = null;
         instance.fixedViewSignature = null;
         instance.canvas.classList.remove('moving','resizing');
@@ -3151,11 +4472,53 @@ def get_image_editor_component():
         instance.blurCanvasSignature = null;
         instance.backdropImage.src = nextBackdropSrc;
       }
+      const nextCustomBackgroundSrc = String(cfg.custom_background_image || '');
+      const nextCustomBackgroundRevision = Math.max(
+        0, Math.floor(Number(cfg.custom_background_revision) || 0)
+      );
+      if (
+        nextCustomBackgroundSrc !== instance.customBackgroundSrc ||
+        nextCustomBackgroundRevision !== instance.customBackgroundRevision
+      ) {
+        instance.customBackgroundSrc = nextCustomBackgroundSrc;
+        instance.customBackgroundRevision = nextCustomBackgroundRevision;
+        instance.customBackgroundReady = false;
+
+        // Nunca reutilizar o Image anterior nem atribuir src="". Em alguns
+        // navegadores, src vazio pode solicitar a URL do documento e callbacks
+        // atrasados podem voltar a desenhar um fundo que já foi removido.
+        const replacementImage = new Image();
+        instance.customBackgroundImage = replacementImage;
+        if (nextCustomBackgroundSrc) {
+          replacementImage.onload = () => {
+            if (
+              instance.customBackgroundImage !== replacementImage ||
+              instance.customBackgroundSrc !== nextCustomBackgroundSrc ||
+              instance.customBackgroundRevision !== nextCustomBackgroundRevision
+            ) return;
+            instance.customBackgroundReady = true;
+            instance.blurCanvasSignature = null;
+            instance.draw();
+          };
+          replacementImage.onerror = () => {
+            if (instance.customBackgroundImage !== replacementImage) return;
+            instance.customBackgroundReady = false;
+            instance.draw();
+          };
+          replacementImage.src = nextCustomBackgroundSrc;
+        } else {
+          // Com a referência removida, o canvas redesenha imediatamente a
+          // imagem principal usando novamente o preenchimento selecionado.
+          instance.draw();
+        }
+      }
       const drawSignature = JSON.stringify([
         incomingToken, cfg.shape, cfg.cut, cfg.fold, cfg.art, cfg.safe,
         Array.isArray(cfg.guides) ? cfg.guides.join(',') : '',
         cfg.fit_mode, cfg.background_mode, cfg.blur_mm, cfg.bg,
+        cfg.custom_background_image, cfg.custom_background_revision,
         instance.imageReady, instance.backdropReady,
+        instance.customBackgroundReady,
         transformSignature(instance.state),
       ]);
       // Um rerun provocado por margem, disposição ou outro controle externo não
@@ -3242,12 +4605,13 @@ def get_artwork_pool_component():
     .pool-batch-danger:disabled { opacity:.35; cursor:not-allowed; }
     .atomica-pool-root {
       display:grid;
-      grid-template-columns:repeat(auto-fill, 136px);
+      grid-template-columns:repeat(auto-fill, minmax(min(100%, 136px), 1fr));
       justify-content:start;
       align-items:start;
       gap:11px;
       width:100%;
       max-width:980px;
+      box-sizing:border-box;
     }
     .pool-card {
       position:relative;
@@ -3256,7 +4620,8 @@ def get_artwork_pool_component():
       align-items:stretch;
       gap:7px;
       box-sizing:border-box;
-      width:136px;
+      width:100%;
+      min-width:0;
       min-height:143px;
       padding:7px;
       border:1px solid #29415F;
@@ -3268,11 +4633,13 @@ def get_artwork_pool_component():
       transition:border-color .12s, background .12s, transform .12s;
     }
     .pool-card:hover { border-color:#4D83B7; background:#132B4B; transform:translateY(-1px); }
+    /* A moldura verde identifica apenas a arte em foco para edição.
+       A caixa azul no canto inferior direito continua sendo a seleção em lote. */
     .pool-card.selected {
-      border:2px solid #26C6DA;
+      border:2px solid #2DBB72;
       padding:6px;
-      background:#122D4B;
-      box-shadow:0 0 0 1px rgba(38,198,218,.12);
+      background:#102D35;
+      box-shadow:0 0 0 2px rgba(45,187,114,.16), 0 7px 20px rgba(0,0,0,.18);
     }
     .pool-card.dragging { opacity:.42; cursor:grabbing; transform:scale(.97); }
     .pool-thumb {
@@ -3307,7 +4674,15 @@ def get_artwork_pool_component():
       display:flex; align-items:flex-start; justify-content:space-between;
       pointer-events:none;
     }
-    .pool-grip, .pool-remove { pointer-events:auto; box-shadow:0 1px 5px rgba(0,0,0,.28); }
+    .pool-grip, .pool-remove, .pool-order-step { pointer-events:auto; box-shadow:0 1px 5px rgba(0,0,0,.28); }
+    .pool-order-controls { display:none; align-items:center; gap:4px; pointer-events:none; }
+    .pool-order-step {
+      display:flex; align-items:center; justify-content:center; pointer-events:auto;
+      width:27px; height:27px; border-radius:7px; padding:0;
+      color:#FFFFFF; background:rgba(10,25,45,.86); border:1px solid rgba(255,255,255,.25);
+      font-size:15px; font-weight:900; line-height:1; cursor:pointer;
+    }
+    .pool-order-step:disabled { opacity:.3; cursor:not-allowed; }
     .pool-grip {
       display:flex; align-items:center; justify-content:center;
       width:25px; height:25px; border-radius:7px;
@@ -3315,14 +4690,6 @@ def get_artwork_pool_component():
       font-size:17px; line-height:1; cursor:grab;
     }
     .pool-remove { width:25px; height:25px; font-size:16px; background:rgba(10,25,45,.86); }
-    .pool-selected-mark {
-      position:absolute; left:12px; right:auto; top:auto; bottom:38px; z-index:1;
-      width:19px; height:19px; border-radius:50%;
-      display:flex; align-items:center; justify-content:center;
-      color:#061B2D; background:#26C6DA; border:1px solid #FFFFFF;
-      font-size:12px; font-weight:900; line-height:1;
-      pointer-events:none;
-    }
     .pool-batch-toggle {
       position:absolute; right:11px; bottom:36px; z-index:2;
       display:flex; align-items:center; justify-content:center;
@@ -3333,21 +4700,32 @@ def get_artwork_pool_component():
     }
     .pool-batch-toggle:hover { border-color:#26C6DA; }
     .pool-batch-toggle.checked { color:#061B2D; background:#26C6DA; border-color:#FFFFFF; }
+    @media (max-width:1024px) {
+      .pool-order-controls { display:flex; }
+      .pool-order-step { width:32px; height:32px; font-size:17px; }
+      .pool-grip, .pool-remove { width:32px; height:32px; }
+      .pool-batch-toggle { width:34px; height:34px; right:8px; bottom:38px; font-size:17px; }
+      .pool-counter button { width:36px; height:36px; font-size:21px; }
+      .pool-qty { width:64px; min-width:64px; height:36px; font-size:14px; }
+      .pool-actions { top:8px; left:8px; right:8px; }
+    }
     @media (max-width:520px) {
-      .atomica-pool-root { grid-template-columns:repeat(auto-fill, 130px); gap:8px; }
-      .pool-card { width:130px; min-height:130px; padding:6px; }
+      .atomica-pool-root { grid-template-columns:repeat(auto-fill, minmax(min(100%, 124px), 1fr)); gap:8px; }
+      .pool-card { width:100%; min-width:0; min-height:132px; padding:6px; }
       .pool-card.selected { padding:5px; }
       .pool-counter { gap:4px; }
-      .pool-counter button { width:24px; height:28px; }
-      .pool-qty { width:58px; min-width:58px; font-size:13px; }
-      .pool-actions { top:9px; left:9px; right:9px; }
-      .pool-selected-mark { left:10px; bottom:35px; }
+      .pool-counter button { width:32px; height:36px; }
+      .pool-qty { width:54px; min-width:54px; height:36px; font-size:13px; }
+      .pool-actions { top:8px; left:8px; right:8px; }
+      .pool-order-step, .pool-grip, .pool-remove { width:26px; height:28px; }
+      .pool-order-controls { gap:1px; }
+      .pool-batch-toggle { width:32px; height:32px; right:7px; bottom:38px; }
       .pool-toolbar { align-items:stretch; }
       .pool-fill-button { width:100%; }
       .pool-batch-toolbar { align-items:stretch; }
       .pool-batch-copy { min-width:0; width:100%; }
       .pool-batch-actions { width:100%; }
-      .pool-batch-secondary, .pool-batch-danger { flex:1 1 0; }
+      .pool-batch-secondary, .pool-batch-danger { flex:1 1 0; min-height:42px; white-space:normal; }
     }
     """
     js = r"""
@@ -3382,6 +4760,23 @@ def get_artwork_pool_component():
       let draggedId = null;
       const byId = new Map(items.map(item => [String(item.id), item]));
       root.__atomicaPoolSelectedId = selectedId;
+      // Mantém o estado do componente sincronizado quando a seleção muda fora
+      // do Pool (por exemplo, pelas setas junto à prévia de ajuste).
+      const previousPropSelectedId = root.dataset.atomicaPoolPropSelectedId;
+      if (previousPropSelectedId !== undefined && previousPropSelectedId !== selectedId) {
+        setStateValue('selected_id', selectedId);
+      }
+      root.dataset.atomicaPoolPropSelectedId = selectedId;
+      const incomingBatchSelection = order.filter(id => batchSelectedIds.has(id));
+      const incomingBatchSelectionSignature = incomingBatchSelection.join('|');
+      const previousPropBatchSelectionSignature = root.dataset.atomicaPoolPropBatchSelection;
+      if (previousPropBatchSelectionSignature === undefined ||
+          previousPropBatchSelectionSignature !== incomingBatchSelectionSignature) {
+        // O estado do Python é a fonte de verdade quando uma operação em lote
+        // termina e limpa a seleção programaticamente.
+        setStateValue('selected_ids', incomingBatchSelection);
+      }
+      root.dataset.atomicaPoolPropBatchSelection = incomingBatchSelectionSignature;
       root.__atomicaPoolBatchSelectedIds = batchSelectedIds;
       root.__atomicaPoolBatchSelectedCount = batchSelectedIds.size;
       // O componente recebe novas props em cada rerun. A troca da arte em foco
@@ -3414,16 +4809,6 @@ def get_artwork_pool_component():
           const id = String(card.dataset.id || '');
           const isFocused = id === activeId;
           card.classList.toggle('selected', isFocused);
-          let mark = card.querySelector('.pool-selected-mark');
-          if (isFocused && !mark) {
-            mark = document.createElement('span');
-            mark.className = 'pool-selected-mark';
-            mark.textContent = '✓';
-            mark.setAttribute('aria-label', 'Arte em edição na prévia');
-            card.appendChild(mark);
-          } else if (!isFocused && mark) {
-            mark.remove();
-          }
           const batchToggle = card.querySelector('.pool-batch-toggle');
           if (batchToggle) {
             const selectedSet = root.__atomicaPoolBatchSelectedIds || new Set();
@@ -3432,6 +4817,8 @@ def get_artwork_pool_component():
             batchToggle.textContent = batchSelected ? '✓' : '□';
             batchToggle.title = batchSelected ? 'Remover da seleção em lote' : 'Incluir na seleção em lote';
             batchToggle.setAttribute('aria-pressed', batchSelected ? 'true' : 'false');
+            batchToggle.setAttribute('aria-checked', batchSelected ? 'true' : 'false');
+            batchToggle.setAttribute('aria-label', batchSelected ? 'Desmarcar arte para ajuste em lote' : 'Marcar arte para ajuste em lote');
           }
         });
       }
@@ -3625,16 +5012,36 @@ def get_artwork_pool_component():
             remove.textContent = '…';
             root.__atomicaPoolSetTriggerValue('remove_id', id);
           });
-          actions.append(grip, remove);
+          const orderControls = document.createElement('div');
+          orderControls.className = 'pool-order-controls';
+          const moveUp = document.createElement('button');
+          moveUp.type = 'button'; moveUp.className = 'pool-order-step';
+          moveUp.textContent = '↑'; moveUp.title = 'Mover uma posição para cima';
+          moveUp.setAttribute('aria-label', 'Mover arte para cima na ordem de impressão');
+          moveUp.disabled = order.indexOf(id) <= 0;
+          moveUp.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            const from = order.indexOf(id);
+            if (from <= 0) return;
+            order.splice(from, 1); order.splice(from - 1, 0, id);
+            render(); publishOrder(); root.__atomicaPoolUpdateFillControls();
+          });
+          const moveDown = document.createElement('button');
+          moveDown.type = 'button'; moveDown.className = 'pool-order-step';
+          moveDown.textContent = '↓'; moveDown.title = 'Mover uma posição para baixo';
+          moveDown.setAttribute('aria-label', 'Mover arte para baixo na ordem de impressão');
+          moveDown.disabled = order.indexOf(id) >= order.length - 1;
+          moveDown.addEventListener('click', event => {
+            event.preventDefault(); event.stopPropagation();
+            const from = order.indexOf(id);
+            if (from < 0 || from >= order.length - 1) return;
+            order.splice(from, 1); order.splice(from + 1, 0, id);
+            render(); publishOrder(); root.__atomicaPoolUpdateFillControls();
+          });
+          orderControls.append(moveUp, moveDown);
+          actions.append(grip, orderControls, remove);
 
           card.append(thumb, counter, actions);
-          if (id === selectedId) {
-            const selectedMark = document.createElement('span');
-            selectedMark.className = 'pool-selected-mark';
-            selectedMark.textContent = '✓';
-            selectedMark.setAttribute('aria-label', 'Arte em edição na prévia');
-            card.appendChild(selectedMark);
-          }
           const batchToggle = document.createElement('button');
           const isBatchSelected = batchSelectedIds.has(id);
           batchToggle.type = 'button';
@@ -3642,6 +5049,12 @@ def get_artwork_pool_component():
           batchToggle.textContent = isBatchSelected ? '✓' : '□';
           batchToggle.title = isBatchSelected ? 'Remover da seleção em lote' : 'Incluir na seleção em lote';
           batchToggle.setAttribute('aria-pressed', isBatchSelected ? 'true' : 'false');
+          batchToggle.setAttribute('role', 'checkbox');
+          batchToggle.setAttribute('aria-checked', isBatchSelected ? 'true' : 'false');
+          batchToggle.setAttribute('aria-label', isBatchSelected ? 'Desmarcar arte para ajuste em lote' : 'Marcar arte para ajuste em lote');
+          // O botão é filho do cartão, que também responde ao toque para abrir a arte.
+          // Interrompe a propagação do pointerdown sem cancelar o clique nativo do botão.
+          batchToggle.addEventListener('pointerdown', event => event.stopPropagation(), { passive: true });
           batchToggle.addEventListener('click', event => {
             event.preventDefault(); event.stopPropagation();
             const selectedSet = root.__atomicaPoolBatchSelectedIds || new Set();
@@ -3734,14 +5147,21 @@ def render_button_screen_preview_cached(
     background_mode: str,
     blur_mm: float,
     item_bg: str,
+    background_image_digest: str,
+    background_image_bytes: bytes,
     guides: tuple,
 ) -> Image.Image:
     """Cacheia cada botton individual; alterar uma arte não redesenha as demais."""
     image = load_image_preview(image_digest, image_bytes, 1200)
+    custom_background = (
+        load_image_preview(background_image_digest, background_image_bytes, 1200)
+        if background_image_bytes else None
+    )
     return render_button(
         spec, image, ppm=ppm, zoom=zoom, off_x=off_x, off_y=off_y,
         bg=item_bg, guides=guides, pad_mm=0.5, line_mm=0.25,
         fit_mode=fit_mode, blur_mm=blur_mm, background_mode=background_mode,
+        background_image=custom_background,
         ss=2,
     )
 
@@ -3771,10 +5191,15 @@ def render_mixed_sheet_preview_cached(
     ImageDraw.Draw(sheet).rectangle([0, 0, sheet.width - 1, sheet.height - 1], outline="#C9CED6")
     for item_index, cx, cy in placements:
         payload = item_payload[item_index]
-        image_digest, image_bytes, zoom, off_x, off_y, fit_mode, background_mode, blur_mm, item_bg = payload
+        (
+            image_digest, image_bytes, zoom, off_x, off_y, fit_mode,
+            background_mode, blur_mm, item_bg, background_image_digest,
+            background_image_bytes,
+        ) = payload
         button = render_button_screen_preview_cached(
             image_digest, image_bytes, spec, ppm, zoom, off_x, off_y,
-            fit_mode, background_mode, blur_mm, item_bg, guides,
+            fit_mode, background_mode, blur_mm, item_bg,
+            background_image_digest, background_image_bytes, guides,
         )
         sheet.paste(
             button,
@@ -3796,6 +5221,7 @@ def build_button_art_png(
     fit_mode: str,
     background_mode: str,
     blur_mm: float,
+    background_image: Image.Image | None = None,
 ) -> tuple[bytes, tuple[int, int]]:
     """Exporta PNG no tamanho físico; artes redondas recebem transparência fora do corte."""
     ppm = dpi / 25.4
@@ -3810,6 +5236,7 @@ def build_button_art_png(
         fit_mode=fit_mode,
         background_mode=background_mode,
         blur_mm=blur_mm,
+        background_image=background_image,
     )
     if spec.shape == "circle":
         # PNG individual redondo: preserva a arte e o preenchimento dentro do
@@ -4085,6 +5512,189 @@ def _safety_relative_transform(saved: dict, profile: dict | None = None) -> bool
     return True
 
 
+def reset_artwork_image_adjustments(item_id: int) -> None:
+    """Restaura os controles visuais e reativa o arquivo original da arte."""
+    item = _find_artwork_item(int(item_id))
+    if item is None:
+        return
+    edit = item.setdefault("edit", {})
+    prefix = f"artwork_{int(item_id)}"
+    for field, default_value in IMAGE_ADJUSTMENT_DEFAULTS.items():
+        edit[field] = default_value
+        widget_key = f"{prefix}_{field}"
+        if widget_key in st.session_state:
+            st.session_state[widget_key] = default_value
+    item.pop("image_processing_error", None)
+
+
+def set_artwork_background_removal(item_id: int, enabled: bool) -> None:
+    """Ativa/desativa remoção de fundo sem substituir o arquivo original."""
+    item = _find_artwork_item(int(item_id))
+    if item is None:
+        return
+    item.setdefault("edit", {})["remove_background"] = bool(enabled)
+    item.pop("image_processing_error", None)
+    item.pop("_processed_image_signature", None)
+
+
+def _custom_background_payload(edit: dict) -> tuple[bytes, str]:
+    """Retorna somente uma camada de fundo explicitamente ativa e completa.
+
+    O sinalizador explícito evita que bytes residuais de sessões antigas ou de
+    um uploader versionado mantenham o fundo ativo em outras áreas do app.
+    Sessões anteriores à v3.25 são migradas pela presença simultânea de bytes
+    e digest, mas depois disso o sinalizador passa a ser a fonte de verdade.
+    """
+    if not isinstance(edit, dict):
+        return b"", ""
+    data = edit.get("background_image_bytes") or b""
+    digest = str(edit.get("background_image_digest", "") or "")
+    active = edit.get("custom_background_active")
+    if active is None:
+        active = bool(data and digest)
+    if not active or not isinstance(data, bytes) or not data or len(digest) != 64:
+        return b"", ""
+    return data, digest
+
+
+def _prepare_batch_custom_background_upload(uploaded) -> tuple[bytes, str, str] | None:
+    """Valida imagem escolhida no painel de lote e retorna bytes, hash e nome."""
+    if uploaded is None:
+        return None
+    data = uploaded.getvalue() if hasattr(uploaded, "getvalue") else bytes(uploaded)
+    if not data:
+        return None
+    if len(data) > 20 * 1024 * 1024:
+        raise ValueError("O arquivo ultrapassa o limite de 20 MB.")
+    with Image.open(io.BytesIO(data)) as probe:
+        width, height = probe.size
+        probe.verify()
+    if width < 32 or height < 32:
+        raise ValueError("A imagem precisa ter pelo menos 32 × 32 pixels.")
+    digest = hashlib.sha256(data).hexdigest()
+    name = str(getattr(uploaded, "name", "Fundo personalizado"))
+    return data, digest, name
+
+
+def set_artwork_custom_background(item_id: int, upload_key: str) -> None:
+    """Salva uma imagem de fundo independente para compor a borda Arte–Corte."""
+    item = _find_artwork_item(int(item_id))
+    uploaded = st.session_state.get(upload_key)
+    if item is None or uploaded is None:
+        return
+    try:
+        data = uploaded.getvalue() if hasattr(uploaded, "getvalue") else bytes(uploaded)
+        if not data:
+            return
+        if len(data) > 20 * 1024 * 1024:
+            raise ValueError("O arquivo ultrapassa o limite de 20 MB.")
+        with Image.open(io.BytesIO(data)) as probe:
+            probe.verify()
+        with Image.open(io.BytesIO(data)) as source:
+            width, height = source.size
+            if width < 32 or height < 32:
+                raise ValueError("A imagem precisa ter pelo menos 32 × 32 pixels.")
+            digest = hashlib.sha256(data).hexdigest()
+            edit = item.setdefault("edit", {})
+            if edit.get("background_image_digest") == digest and edit.get("custom_background_active", True):
+                edit["custom_background_active"] = True
+                edit["custom_background_pending"] = False
+                edit["background_mode"] = "Fundo personalizado"
+                edit.pop("background_image_error", None)
+                return
+            if not bool(edit.get("custom_background_active", False)):
+                previous_mode = edit.get("background_image_previous_fill_mode")
+                if previous_mode not in {"Cor sólida", "Imagem desfocada"}:
+                    current_mode = str(edit.get("background_mode", "Cor sólida"))
+                    previous_mode = current_mode if current_mode in {"Cor sólida", "Imagem desfocada"} else "Cor sólida"
+                edit["background_image_previous_fill_mode"] = previous_mode
+            edit["background_image_bytes"] = data
+            edit["background_image_digest"] = digest
+            edit["background_image_name"] = str(getattr(uploaded, "name", "Fundo personalizado"))
+            edit["custom_background_active"] = True
+            edit["custom_background_pending"] = False
+            edit["background_mode"] = "Fundo personalizado"
+            edit["custom_background_revision"] = int(edit.get("custom_background_revision", 0) or 0) + 1
+            edit.pop("background_image_error", None)
+            prefix = f"artwork_{int(item_id)}"
+            st.session_state[f"{prefix}_background_mode"] = "Fundo personalizado"
+            cut_key = f"{prefix}_fit_cut_checked"
+            art_key = f"{prefix}_fit_art_checked"
+            already_uses_art_basis = str(edit.get("fit_basis_mode", st.session_state.get(f"{prefix}_fit_basis_mode", "cut"))).lower() == "art"
+            # A seleção de Fundo personalizado já prepara a guia Arte antes do
+            # upload. Mesmo em sessões antigas, esta migração preserva qualquer
+            # zoom/posição manual em vez de recentrar a imagem ao carregar.
+            if not already_uses_art_basis:
+                _activate_art_area_preserving_manual_transform(int(item_id), prefix)
+            else:
+                st.session_state[cut_key] = False
+                # Não marcar o preset Arte quando a composição já é manual.
+                if bool(edit.get("manual_transform_active", False)):
+                    st.session_state[art_key] = False
+                else:
+                    st.session_state[art_key] = True
+    except Exception as exc:
+        item.setdefault("edit", {})["background_image_error"] = str(exc)
+
+
+def remove_artwork_custom_background(
+    item_id: int, restore_previous_fill_mode: bool = True, commit_transform: bool = True
+) -> None:
+    """Desativa a camada de fundo em todas as saídas e invalida artefatos antigos."""
+    item = _find_artwork_item(int(item_id))
+    if item is None:
+        return
+
+    # O clique manual confirma o canvas antes de remover. Os callbacks de
+    # prioridade já estão no meio de uma troca explícita de preset e não devem
+    # sobrescrever o novo estado com o último transform enviado pelo navegador.
+    if commit_transform:
+        try:
+            _commit_artwork_editor_state(int(item_id))
+        except (NameError, TypeError, ValueError):
+            pass
+
+    edit = item.setdefault("edit", {})
+    # A bandeira é desligada antes dos dados serem limpos. Todas as rotinas de
+    # prévia/exportação consultam a mesma fonte de verdade (_custom_background_payload).
+    edit["custom_background_active"] = False
+    edit["custom_background_pending"] = False
+    edit["background_image_bytes"] = None
+    edit["background_image_digest"] = ""
+    edit["background_image_name"] = ""
+    edit.pop("background_image_error", None)
+    edit["custom_background_revision"] = int(edit.get("custom_background_revision", 0) or 0) + 1
+    edit["background_upload_revision"] = int(edit.get("background_upload_revision", 0) or 0) + 1
+    previous_fill_mode = edit.pop("background_image_previous_fill_mode", None)
+    if restore_previous_fill_mode:
+        restored_mode = previous_fill_mode if previous_fill_mode in {"Cor sólida", "Imagem desfocada"} else "Cor sólida"
+        edit["background_mode"] = restored_mode
+        st.session_state[f"artwork_{int(item_id)}_background_mode"] = restored_mode
+
+    # Compatibilidade com registros muito antigos que guardavam transformação
+    # temporária ao ativar o fundo. A remoção volta ao enquadramento anterior.
+    previous = edit.pop("background_image_previous_transform", None)
+    if isinstance(previous, dict):
+        for field, value in previous.items():
+            if value is not None:
+                edit[field] = value
+        prefix = f"artwork_{int(item_id)}"
+        for field in (
+            "fit_basis_mode", "fit_cut_checked", "fit_art_checked", "zoom", "offset_x", "offset_y",
+        ):
+            if field in edit:
+                st.session_state[f"{prefix}_{field}"] = edit[field]
+        edit["transform_revision"] = int(edit.get("transform_revision", 0) or 0) + 1
+        st.session_state[f"{prefix}_transform_revision"] = edit["transform_revision"]
+        _safety_relative_transform(edit, edit.get("scale_reference_spec"))
+
+    # Descarta também qualquer exportação já preparada com o fundo anterior.
+    st.session_state.pop("focused_art_png_export", None)
+    st.session_state.pop("pdf", None)
+    st.session_state.pop("_sheet_real_size_preview_cache", None)
+    st.session_state["_custom_background_removed_notice"] = int(item_id)
+
+
 def ensure_artwork_edit_state(
     item: dict,
     spec: ButtonSpec | None = None,
@@ -4102,6 +5712,12 @@ def ensure_artwork_edit_state(
     item_id = int(item["id"])
     prefix = f"artwork_{item_id}"
     saved = item.setdefault("edit", {})
+    # Migração de sessões v3.24 e anteriores: reconhece camadas já carregadas.
+    # Depois da migração, custom_background_active controla todas as saídas.
+    if "custom_background_active" not in saved:
+        saved["custom_background_active"] = bool(
+            saved.get("background_image_bytes") and saved.get("background_image_digest")
+        )
     defaults = {
         "zoom": 1.0,
         "offset_x": 0.0,
@@ -4115,11 +5731,43 @@ def ensure_artwork_edit_state(
         "background_mode": "Cor sólida",
         "blur_strength": 0.5,
         "background": "#FFFFFF",
+        "background_image_bytes": None,
+        "background_image_digest": "",
+        "background_image_name": "",
+        "custom_background_active": False,
+        "custom_background_pending": False,
+        "background_upload_revision": 0,
+        "custom_background_revision": 0,
+        **IMAGE_ADJUSTMENT_DEFAULTS,
     }
     for suffix, default_value in defaults.items():
         if suffix not in saved:
             legacy_key = f"{prefix}_{suffix}"
             saved[suffix] = st.session_state.get(legacy_key, default_value)
+    # Nas versões anteriores, o desfoque e a cor sólida compartilhavam um
+    # único campo. Migra a cor antiga para a base do desfoque apenas uma vez.
+    if "blur_base_color" not in saved:
+        saved["blur_base_color"] = str(saved.get("background", "#FFFFFF"))
+    has_custom_layer = bool(
+        saved.get("custom_background_active")
+        and saved.get("background_image_bytes")
+        and saved.get("background_image_digest")
+    )
+    if has_custom_layer:
+        saved["background_mode"] = "Fundo personalizado"
+        saved["custom_background_pending"] = False
+    elif str(saved.get("background_mode")) == "Fundo personalizado":
+        if bool(saved.get("custom_background_pending", False)):
+            # Modo escolhido; upload ainda não concluído. Não restaurar o
+            # preenchimento anterior em cada rerun, pois o uploader depende
+            # dessa seleção para aparecer.
+            previous_mode = saved.get("background_image_previous_fill_mode")
+            if previous_mode not in {"Cor sólida", "Imagem desfocada"}:
+                saved["background_image_previous_fill_mode"] = "Cor sólida"
+        else:
+            saved["background_mode"] = str(
+                saved.pop("background_image_previous_fill_mode", None) or "Cor sólida"
+            )
 
     # O estado dos dois checkboxes define a base ativa quando exatamente um
     # está marcado. Quando ambos estão desmarcados, preservamos a última base
@@ -4286,10 +5934,36 @@ def ensure_artwork_edit_state(
         initial_basis = spec.art if mode == "art" else spec.cut
         saved["initial_safety_relative_zoom"] = float(initial_basis) / max(float(spec.safe), 1e-9)
 
+    # Migração/normalização individual: qualquer arte com o preset Corte ativo
+    # deve manter os preenchimentos e a borda desativados, inclusive em sessões
+    # que foram salvas por versões anteriores onde esses estados coexistiam.
+    cut_preset_active = bool(
+        saved.get("fit_cut_checked", False)
+        and not saved.get("manual_transform_active", False)
+        and str(saved.get("fit_basis_mode", "cut")) == "cut"
+    )
+    if cut_preset_active and (
+        str(saved.get("background_mode", "Cor sólida")) != "Sem preenchimento"
+        or saved.get("custom_background_active")
+        or saved.get("custom_background_pending")
+        or saved.get("background_image_bytes")
+        or saved.get("background_image_digest")
+    ):
+        saved = _deactivate_individual_fill_for_cut(item_id, prefix, saved)
+    elif (
+        bool(saved.get("manual_transform_active", False))
+        and str(saved.get("background_mode", "")) == "Sem preenchimento"
+    ):
+        # Um gesto manual no canvas desmarca o preset Corte. Nesse momento,
+        # libera novamente o último preenchimento para o usuário poder escolher
+        # se deseja manter a borda enquanto continua ajustando a imagem.
+        _restore_individual_fill_after_cut(saved, prefix)
+
     if sync_session:
         # Preparar estado por ID antes de instanciar os respectivos widgets.
         for suffix, default_value in defaults.items():
             st.session_state[f"{prefix}_{suffix}"] = saved.get(suffix, default_value)
+        st.session_state[f"{prefix}_blur_base_color"] = saved.get("blur_base_color", "#FFFFFF")
         if spec is not None:
             st.session_state[f"{prefix}_scale_reference_diameter"] = saved.get(
                 "scale_reference_diameter", float(spec.safe)
@@ -4332,6 +6006,8 @@ def _new_artwork_pool_entry(item_id: int, file_name: str, image_bytes: bytes, di
         "name": str(file_name),
         "image": image_bytes,
         "image_digest": digest,
+        "original_image": image_bytes,
+        "original_image_digest": digest,
         "thumbnail_data_url": thumb_url,
         "qty": 1,
         "edit": {
@@ -4355,6 +6031,14 @@ def _new_artwork_pool_entry(item_id: int, file_name: str, image_bytes: bytes, di
             "background_mode": "Cor sólida",
             "blur_strength": 0.5,
             "background": "#FFFFFF",
+            "blur_base_color": "#FFFFFF",
+            "background_image_bytes": None,
+            "background_image_digest": "",
+            "background_image_name": "",
+            "custom_background_active": False,
+            "custom_background_pending": False,
+            "custom_background_revision": 0,
+            **IMAGE_ADJUSTMENT_DEFAULTS,
         },
     }
 
@@ -4368,14 +6052,15 @@ def _mobile_upload_inbox_monitor(spec: ButtonSpec):
     try:
         from mobile_upload import take_uploaded_files, upload_session_is_active
         if not upload_session_is_active(str(state["token"])):
-            st.warning("Este QR Code expirou por inatividade. Gere um novo código para continuar enviando imagens.")
+            if not state.get("_expired_notice_shown"):
+                st.warning("Este QR Code expirou por inatividade. Gere uma nova sessão para continuar enviando imagens.")
+                state["_expired_notice_shown"] = True
             return
         received = take_uploaded_files(str(state["token"]))
     except Exception as exc:
         st.error(f"Não foi possível consultar os envios do smartphone: {exc}")
         return
     if not received:
-        st.caption("Aguardando imagens enviadas pelo smartphone… Esta área verifica novos arquivos automaticamente.")
         return
 
     items = st.session_state.setdefault("artwork_items", [])
@@ -4405,58 +6090,178 @@ def _mobile_upload_inbox_monitor(spec: ButtonSpec):
         st.rerun(scope="app")
 
 
+def _ensure_mobile_upload_session(force_new: bool = False) -> dict:
+    """Cria ou reutiliza uma sessao HTTP local para upload resiliente em dispositivos moveis."""
+    from mobile_upload import (
+        close_upload_session, create_upload_session, get_lan_ip,
+        get_mobile_upload_port, make_qr_code_png, renew_upload_session,
+        upload_session_is_active,
+    )
+
+    current = st.session_state.get("_mobile_upload_session")
+    if isinstance(current, dict) and current.get("token") and not force_new:
+        token = str(current["token"])
+        if upload_session_is_active(token) and renew_upload_session(token):
+            return current
+
+    if isinstance(current, dict) and current.get("token"):
+        close_upload_session(str(current["token"]))
+
+    host = get_lan_ip()
+    if not host:
+        raise RuntimeError("Nao foi possivel identificar o endereco IPv4 da rede local deste computador.")
+    port = get_mobile_upload_port()
+    token = create_upload_session()
+    url = f"http://{host}:{port}/upload/{token}"
+    session = {
+        "token": token, "url": url, "qr_png": make_qr_code_png(url),
+        "host": host, "port": port,
+    }
+    st.session_state["_mobile_upload_session"] = session
+    return session
+
+
 def _render_mobile_upload_panel(spec: ButtonSpec):
-    """Painel QR de transferência local, sem serviço externo ou conta adicional."""
-    with st.expander("📱 Enviar imagens pelo smartphone · QR Code", expanded=False):
-        st.caption(
-            "Gere um QR Code temporário, leia com a câmera do celular e envie várias imagens diretamente para o Pool. "
-            "O computador e o smartphone precisam estar conectados à mesma rede Wi‑Fi."
+    """Painel visual de transferência local de imagens por QR Code."""
+    with st.expander("📲 Enviar imagens pelo smartphone", expanded=False):
+        st.markdown(
+            """
+            <style>
+              .mobile-transfer-hero{position:relative;overflow:hidden;display:grid;grid-template-columns:minmax(0,1fr) auto;
+                gap:18px;align-items:center;margin:2px 0 14px;padding:19px 20px;border:1px solid rgba(102,145,180,.34);
+                border-radius:17px;background:radial-gradient(circle at 92% 15%,rgba(238,29,126,.17),transparent 30%),
+                radial-gradient(circle at 5% 100%,rgba(27,169,216,.18),transparent 35%),linear-gradient(125deg,#142941,#101C2D 70%);
+                box-shadow:0 12px 30px rgba(0,0,0,.18)}
+              .mobile-transfer-hero:before{content:"";position:absolute;top:0;left:0;right:0;height:3px;
+                background:linear-gradient(90deg,#1BA9D8 0 33.3%,#EE1D7E 33.3% 66.6%,#F5DD1E 66.6%)}
+              .mobile-transfer-kicker{font-size:9px;font-weight:900;letter-spacing:.16em;color:#8DD8E9;margin-bottom:7px}
+              .mobile-transfer-title{font-size:clamp(17px,2vw,22px);font-weight:850;line-height:1.18;color:#F7FAFD;max-width:620px}
+              .mobile-transfer-copy{font-size:11px;line-height:1.55;color:#B8C8D8;max-width:650px;margin-top:7px}
+              .mobile-transfer-tags{display:flex;flex-wrap:wrap;gap:6px;margin-top:12px}
+              .mobile-transfer-tag{padding:5px 8px;border:1px solid rgba(129,167,197,.28);border-radius:999px;
+                background:rgba(5,18,32,.42);font-size:9px;font-weight:750;color:#D7E5EF}
+              .mobile-transfer-art{width:92px;height:92px;display:grid;place-items:center;border-radius:25px;
+                border:1px solid rgba(116,181,211,.34);background:linear-gradient(145deg,rgba(27,169,216,.18),rgba(238,29,126,.12));
+                color:#BDECF6;box-shadow:inset 0 1px 0 rgba(255,255,255,.08)}
+              .mobile-transfer-art svg{display:block;width:68px;height:68px}
+              .mobile-transfer-steps{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:0 0 13px}
+              .mobile-transfer-step{display:flex;gap:8px;align-items:flex-start;padding:9px 10px;border:1px solid rgba(105,140,171,.2);
+                border-radius:11px;background:rgba(20,39,60,.42);min-width:0}
+              .mobile-transfer-step-no{width:21px;height:21px;display:grid;place-items:center;flex:none;border-radius:7px;
+                background:#1BA9D8;color:#061A29;font-size:9px;font-weight:950}
+              .mobile-transfer-step b{display:block;font-size:10px;line-height:1.25;color:#F0F5F9}
+              .mobile-transfer-step small{display:block;margin-top:3px;font-size:9px;line-height:1.35;color:#AFC0D0}
+              .mobile-qr-panel{height:100%;padding:14px;border:1px solid rgba(93,139,171,.28);border-radius:15px;
+                background:linear-gradient(160deg,rgba(22,45,67,.72),rgba(12,25,41,.86));text-align:center}
+              .mobile-qr-eyebrow{font-size:9px;font-weight:900;letter-spacing:.12em;color:#88D6E6;margin-bottom:8px}
+              .mobile-qr-note{font-size:10px;line-height:1.45;color:#B6C8D8;margin-top:7px}
+              .mobile-session-card{padding:14px 15px;border:1px solid rgba(93,139,171,.25);border-radius:15px;
+                background:rgba(17,35,54,.48);margin-bottom:10px}
+              .mobile-session-status{display:inline-flex;align-items:center;gap:7px;padding:5px 9px;border-radius:999px;
+                border:1px solid rgba(45,187,114,.36);background:rgba(45,187,114,.1);color:#A9E8C4;
+                font-size:9px;font-weight:850;letter-spacing:.04em}
+              .mobile-session-dot{width:7px;height:7px;border-radius:50%;background:#2DBB72;box-shadow:0 0 0 3px rgba(45,187,114,.13)}
+              .mobile-session-title{margin:9px 0 5px;font-size:15px;font-weight:850;color:#F4F8FB}
+              .mobile-session-copy{font-size:10px;line-height:1.48;color:#B4C4D3}
+              .mobile-session-limits{display:flex;flex-wrap:wrap;gap:6px;margin-top:9px}
+              .mobile-session-limit{padding:5px 8px;border-radius:8px;background:rgba(3,15,28,.48);border:1px solid rgba(111,145,174,.18);
+                color:#C5D2DE;font-size:9px;font-weight:700}
+              @media(max-width:640px){.mobile-transfer-hero{grid-template-columns:1fr;padding:15px}.mobile-transfer-art{display:none}
+                .mobile-transfer-steps{grid-template-columns:1fr}.mobile-transfer-step{align-items:center}}
+            </style>
+            <div class="mobile-transfer-hero">
+              <div>
+                <div class="mobile-transfer-kicker">TRANSFERÊNCIA LOCAL · DIRETO PARA O POOL</div>
+                <div class="mobile-transfer-title">Envie imagens do celular sem precisar transferi-las manualmente para o computador</div>
+                <div class="mobile-transfer-copy">Crie uma sessão temporária, leia o QR Code com a câmera do smartphone e envie várias imagens. Os arquivos chegam diretamente ao Pool de Artes deste computador.</div>
+                <div class="mobile-transfer-tags"><span class="mobile-transfer-tag">Mesma rede Wi‑Fi</span><span class="mobile-transfer-tag">Sem serviço em nuvem</span><span class="mobile-transfer-tag">Sessão temporária</span></div>
+              </div>
+              <div class="mobile-transfer-art" aria-hidden="true">
+                <svg viewBox="0 0 96 96" role="presentation" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="27" y="7" width="42" height="82" rx="9" fill="#0A1B2C" stroke="#A7E5F1" stroke-width="2.8"/>
+                  <rect x="32" y="16" width="32" height="59" rx="3" fill="#DDF8FC"/>
+                  <circle cx="48" cy="82" r="2.5" fill="#A7E5F1"/>
+                  <g fill="#12354A">
+                    <rect x="36" y="22" width="10" height="10"/><rect x="38.5" y="24.5" width="5" height="5" fill="#DDF8FC"/>
+                    <rect x="52" y="22" width="10" height="10"/><rect x="54.5" y="24.5" width="5" height="5" fill="#DDF8FC"/>
+                    <rect x="36" y="36" width="10" height="10"/><rect x="38.5" y="38.5" width="5" height="5" fill="#DDF8FC"/>
+                    <rect x="50" y="36" width="4" height="4"/><rect x="56" y="36" width="4" height="4"/>
+                    <rect x="50" y="42" width="4" height="4"/><rect x="58" y="44" width="4" height="4"/>
+                    <rect x="36" y="52" width="4" height="4"/><rect x="42" y="52" width="4" height="4"/>
+                    <rect x="50" y="52" width="4" height="4"/><rect x="56" y="52" width="6" height="6"/>
+                    <rect x="36" y="60" width="6" height="6"/><rect x="46" y="60" width="4" height="4"/>
+                    <rect x="54" y="62" width="4" height="4"/>
+                  </g>
+                  <path d="M18 30h-7v36h7M78 30h7v36h-7" fill="none" stroke="#EE1D7E" stroke-width="2.6" stroke-linecap="round"/>
+                </svg>
+              </div>
+            </div>
+            <div class="mobile-transfer-steps">
+              <div class="mobile-transfer-step"><span class="mobile-transfer-step-no">1</span><span><b>Gere o QR Code</b><small>O computador cria um endereço temporário na rede local.</small></span></div>
+              <div class="mobile-transfer-step"><span class="mobile-transfer-step-no">2</span><span><b>Leia com o celular</b><small>Use a câmera ou o leitor de QR Code do smartphone.</small></span></div>
+              <div class="mobile-transfer-step"><span class="mobile-transfer-step-no">3</span><span><b>Envie para o Pool</b><small>Selecione imagens ou tire fotos e envie em conjunto.</small></span></div>
+            </div>
+            """,
+            unsafe_allow_html=True,
         )
+
         session = st.session_state.get("_mobile_upload_session")
-        if st.button("GERAR QR CODE PARA ENVIAR IMAGENS", key="mobile_upload_create_session", type="primary", use_container_width=True):
+        create_label = "Gerar novo QR Code" if isinstance(session, dict) and session.get("token") else "Gerar QR Code para enviar imagens"
+        create_col, hint_col = st.columns([1, 2.1], gap="medium")
+        with create_col:
+            create_clicked = st.button(
+                create_label,
+                key="mobile_upload_create_session",
+                type="primary",
+                use_container_width=True,
+            )
+        with hint_col:
+            st.markdown(
+                '<div style="padding:8px 2px;color:#AFC0D0;font-size:10px;line-height:1.5;">'
+                '<b style="color:#E4EDF4;">Importante:</b> computador e smartphone precisam estar conectados à mesma rede Wi‑Fi. '
+                'A transferência ocorre somente na rede local.</div>',
+                unsafe_allow_html=True,
+            )
+        if create_clicked:
             try:
-                from mobile_upload import (
-                    close_upload_session, create_upload_session, get_lan_ip,
-                    get_mobile_upload_port, make_qr_code_png,
-                )
-                if isinstance(session, dict) and session.get("token"):
-                    close_upload_session(str(session["token"]))
-                host = get_lan_ip()
-                if not host:
-                    raise RuntimeError("Não foi possível identificar o endereço IPv4 da rede local deste computador.")
-                port = get_mobile_upload_port()
-                token = create_upload_session()
-                url = f"http://{host}:{port}/upload/{token}"
-                st.session_state["_mobile_upload_session"] = {
-                    "token": token, "url": url, "qr_png": make_qr_code_png(url),
-                    "host": host, "port": port,
-                }
+                _ensure_mobile_upload_session(force_new=True)
                 st.rerun()
             except Exception as exc:
                 st.error(f"Não foi possível gerar o QR Code: {exc}")
 
         session = st.session_state.get("_mobile_upload_session")
         if isinstance(session, dict) and session.get("token"):
-            qr_col, info_col = st.columns([1, 1.55], gap="medium")
+            st.divider()
+            qr_col, info_col = st.columns([1, 1.75], gap="large")
             with qr_col:
-                st.image(session["qr_png"], caption="Leia este código com a câmera do smartphone", width=210)
+                with st.container(border=True, key="mobile_qr_card"):
+                    st.markdown('<div class="mobile-qr-eyebrow">APONTE A CÂMERA PARA O CÓDIGO</div>', unsafe_allow_html=True)
+                    st.image(session["qr_png"], width=230)
+                    st.markdown('<div class="mobile-qr-note">Mantenha o QR Code visível enquanto envia as imagens.</div>', unsafe_allow_html=True)
             with info_col:
-                st.markdown("**1. Leia o QR Code**")
-                st.markdown("**2. Escolha fotos ou abra a câmera**")
-                st.markdown("**3. Toque em Enviar imagens**")
+                st.markdown(
+                    '<div class="mobile-session-card">'
+                    '<span class="mobile-session-status"><span class="mobile-session-dot"></span> SESSÃO ATIVA</span>'
+                    '<div class="mobile-session-title">Seu smartphone já pode se conectar</div>'
+                    '<div class="mobile-session-copy">Abra a câmera, leia o código e siga as instruções exibidas no celular. Depois do envio, as imagens serão adicionadas automaticamente ao Pool de Artes.</div>'
+                    '<div class="mobile-session-limits"><span class="mobile-session-limit">30 min sem atividade</span>'
+                    '<span class="mobile-session-limit">Até 50 imagens</span><span class="mobile-session-limit">250 MB por sessão</span>'
+                    '<span class="mobile-session-limit">100 MB por arquivo</span></div></div>',
+                    unsafe_allow_html=True,
+                )
+                st.markdown("**Endereço de envio**")
                 st.code(session["url"], language=None)
-                st.caption("Válido por 30 minutos sem atividade. Limite de 50 imagens e 250 MB por sessão (100 MB por arquivo).")
-                st.caption("Na primeira conexão, o Firewall do Windows pode pedir autorização para o Python na rede privada.")
-            action_col, _ = st.columns([1, 2])
-            if action_col.button("Encerrar sessão e invalidar QR", key="mobile_upload_close_session", use_container_width=True):
-                try:
-                    from mobile_upload import close_upload_session
-                    close_upload_session(str(session["token"]))
-                except Exception:
-                    pass
-                st.session_state.pop("_mobile_upload_session", None)
-                st.rerun()
-            _mobile_upload_inbox_monitor(spec)
+                st.caption("Na primeira conexão, o Firewall do Windows pode solicitar autorização para o Python na rede privada.")
+                close_col, _ = st.columns([1, 1.6])
+                with close_col:
+                    if st.button("Encerrar sessão e invalidar QR", key="mobile_upload_close_session", use_container_width=True):
+                        try:
+                            from mobile_upload import close_upload_session
+                            close_upload_session(str(session["token"]))
+                        except Exception:
+                            pass
+                        st.session_state.pop("_mobile_upload_session", None)
+                        st.rerun()
 
 
 def main():
@@ -4466,13 +6271,338 @@ def main():
         layout="wide",
     )
     brand.apply_theme()
+    st.markdown(
+        """<style>
+        /* Responsividade global: evita colunas estreitas e controles cortados em telas táteis. */
+        @media (max-width: 1024px) {
+          html, body, .stApp, [data-testid="stAppViewContainer"], [data-testid="stMain"] {
+            max-width:100% !important; min-width:0 !important; overflow-x:hidden !important;
+          }
+          [data-testid="stMainBlockContainer"] *, [data-testid="stSidebar"] * { min-width:0; }
+          [data-testid="stMainBlockContainer"] {
+            max-width:100% !important;
+            padding-left:clamp(.75rem,2.5vw,1.25rem) !important;
+            padding-right:clamp(.75rem,2.5vw,1.25rem) !important;
+          }
+          .st-key-editor_workspace [data-testid="stHorizontalBlock"]:has(.st-key-card_left):has(.st-key-card_preview) {
+            display:flex !important; flex-direction:column !important; align-items:stretch !important;
+            gap:1rem !important; width:100% !important;
+          }
+          .st-key-editor_workspace [data-testid="stHorizontalBlock"]:has(.st-key-card_left):has(.st-key-card_preview) > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important; min-width:0 !important;
+          }
+          .st-key-card_left, .st-key-card_preview, .st-key-card_right { min-width:0 !important; width:100% !important; }
+        }
+        @media (max-width: 760px) {
+          /* Quebra responsiva geral para grupos de colunas que não tenham
+             uma regra específica: evita comprimir campos e esconder botões. */
+          [data-testid="stHorizontalBlock"] {
+            display:flex !important; flex-wrap:wrap !important; align-items:stretch !important;
+            gap:.65rem !important; width:100% !important; min-width:0 !important;
+          }
+          [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 245px !important; width:auto !important; max-width:100% !important;
+            min-width:0 !important; box-sizing:border-box !important;
+          }
+          /* Abas tornam-se navegáveis por gesto sem comprimir os seus rótulos. */
+          [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            display:flex !important; flex-wrap:nowrap !important; overflow-x:auto !important;
+            overflow-y:hidden !important; max-width:100% !important; gap:4px !important;
+            overscroll-behavior-x:contain !important; scrollbar-width:thin !important;
+            -webkit-overflow-scrolling:touch !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab"] {
+            flex:0 0 auto !important; min-width:max-content !important; min-height:46px !important;
+            padding:0 13px !important; white-space:nowrap !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab"] p {
+            white-space:nowrap !important; font-size:13px !important;
+          }
+          [data-testid="stSidebar"] {
+            width:min(88vw, 340px) !important; min-width:min(88vw, 340px) !important;
+            max-width:88vw !important;
+          }
+          [data-testid="stSidebarContent"] { overflow-x:hidden !important; }
+          [class*="st-key-artwork_batch_panel_"] [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important; min-width:0 !important;
+          }
+          .st-key-sheet_settings_panel [data-testid="stHorizontalBlock"] {
+            display:flex !important; flex-wrap:wrap !important; gap:.55rem !important;
+          }
+          .st-key-sheet_settings_panel [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 calc(50% - .55rem) !important; width:calc(50% - .55rem) !important;
+            max-width:calc(50% - .55rem) !important; min-width:0 !important;
+          }
+          .st-key-pool_fallback_grid [data-testid="stHorizontalBlock"] {
+            display:flex !important; flex-wrap:wrap !important; gap:.5rem !important;
+          }
+          .st-key-pool_fallback_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 calc(33.333% - .5rem) !important; width:calc(33.333% - .5rem) !important;
+            max-width:calc(33.333% - .5rem) !important; min-width:0 !important;
+          }
+          [data-testid="stRadio"] > div { flex-wrap:wrap !important; gap:.45rem .8rem !important; }
+          [data-testid="stHorizontalBlock"]:has(.st-key-mobile_upload_create_session),
+          [data-testid="stHorizontalBlock"]:has(.mobile-qr-eyebrow):has(.mobile-session-card) {
+            display:flex !important; flex-direction:column !important; gap:.75rem !important;
+          }
+          [data-testid="stHorizontalBlock"]:has(.st-key-mobile_upload_create_session) > [data-testid="stColumn"],
+          [data-testid="stHorizontalBlock"]:has(.mobile-qr-eyebrow):has(.mobile-session-card) > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important; min-width:0 !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has(.st-key-preview_nav_previous) {
+            display:flex !important; flex-wrap:wrap !important; gap:.45rem !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has(.st-key-preview_nav_previous) > [data-testid="stColumn"] {
+            flex:1 1 calc(50% - .45rem) !important; width:calc(50% - .45rem) !important;
+            max-width:calc(50% - .45rem) !important; min-width:0 !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has(.st-key-preview_nav_previous) > [data-testid="stColumn"]:first-child {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has([class*="st-key-prepare_focused_art_png_"]) {
+            display:flex !important; flex-direction:column !important; gap:.55rem !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has([class*="st-key-prepare_focused_art_png_"]) > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important; min-width:0 !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > [data-testid="stColumn"] {
+            flex:1 1 calc(50% - .5rem) !important; min-width:0 !important;
+          }
+          /* Textos da folha de impressão não podem ser truncados em tablets.
+             Isso inclui capacidade Grade/Hexagonal, métricas e dicas em azul. */
+          .st-key-card_right, .st-key-sheet_settings_panel, .st-key-sheet_canvas_panel {
+            min-width:0 !important; max-width:100% !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-card_right [data-testid="stMarkdownContainer"],
+          .st-key-card_right [data-testid="stCaptionContainer"],
+          .st-key-sheet_settings_panel [data-testid="stMarkdownContainer"],
+          .st-key-sheet_settings_panel [data-testid="stCaptionContainer"],
+          .st-key-sheet_canvas_panel [data-testid="stMarkdownContainer"],
+          .st-key-sheet_canvas_panel [data-testid="stCaptionContainer"] {
+            min-width:0 !important; max-width:100% !important; white-space:normal !important;
+            overflow-wrap:anywhere !important;
+          }
+          .st-key-card_right [data-testid="stMarkdownContainer"] p,
+          .st-key-card_right [data-testid="stCaptionContainer"] p,
+          .st-key-sheet_settings_panel [data-testid="stMarkdownContainer"] p,
+          .st-key-sheet_settings_panel [data-testid="stCaptionContainer"] p,
+          .st-key-sheet_canvas_panel [data-testid="stMarkdownContainer"] p,
+          .st-key-sheet_canvas_panel [data-testid="stCaptionContainer"] p,
+          .st-key-sheet_canvas_panel [data-testid="stMetricLabel"],
+          .st-key-sheet_canvas_panel [data-testid="stMetricValue"] {
+            max-width:100% !important; white-space:normal !important;
+            overflow-wrap:anywhere !important; word-break:normal !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stRadio"] label {
+            min-width:0 !important; max-width:100% !important; height:auto !important;
+            white-space:normal !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p {
+            white-space:normal !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-card_right [data-testid="stAlert"],
+          .st-key-sheet_settings_panel [data-testid="stAlert"],
+          .st-key-sheet_canvas_panel [data-testid="stAlert"] {
+            min-width:0 !important; max-width:100% !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-card_right [data-testid="stAlert"] p,
+          .st-key-sheet_settings_panel [data-testid="stAlert"] p,
+          .st-key-sheet_canvas_panel [data-testid="stAlert"] p {
+            white-space:normal !important; overflow-wrap:anywhere !important; word-break:normal !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stHorizontalBlock"]:has(.st-key-sheet_preview_page_previous) {
+            display:flex !important; flex-direction:column !important; gap:.45rem !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stHorizontalBlock"]:has(.st-key-sheet_preview_page_previous) > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important;
+          }
+          .st-key-mobile_qr_card img { max-width:100% !important; height:auto !important; }
+          .stButton > button, .stDownloadButton > button, [data-testid="stFormSubmitButton"] button {
+            min-height:48px !important; white-space:normal !important; line-height:1.25 !important;
+            touch-action:manipulation !important; -webkit-tap-highlight-color:rgba(27,169,216,.18);
+          }
+          /* Checkboxes touch-safe: os estados sao botoes nativos com aparencia de caixa. */
+          [class*="st-key-touch_checkbox_"] [data-testid="stButton"] { width:100% !important; }
+          [class*="st-key-touch_checkbox_"] [data-testid="stButton"] > button {
+            display:flex !important; align-items:center !important; justify-content:flex-start !important;
+            width:100% !important; min-width:0 !important; min-height:50px !important;
+            padding:10px 13px !important; text-align:left !important; white-space:normal !important;
+            overflow-wrap:anywhere !important; line-height:1.3 !important; font-size:14px !important;
+            border-radius:10px !important; touch-action:manipulation !important;
+            user-select:none !important; -webkit-user-select:none !important;
+            -webkit-tap-highlight-color:rgba(27,169,216,.22) !important;
+          }
+          [class*="st-key-touch_checkbox_"] [data-testid="stButton"] > button p {
+            width:100% !important; margin:0 !important; text-align:left !important;
+            white-space:normal !important; overflow-wrap:anywhere !important;
+          }
+          [data-testid="stRadio"] label {
+            min-height:46px !important; display:flex !important; align-items:center !important;
+            touch-action:manipulation !important; padding-block:5px !important;
+          }
+          [data-testid="stSegmentedControl"] button {
+            min-height:48px !important; touch-action:manipulation !important;
+          }
+          [data-testid="stSlider"] [role="slider"] {
+            width:26px !important; height:26px !important; touch-action:none !important;
+          }
+          [data-testid="stSlider"] { padding-block:5px !important; }
+          [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
+          [data-testid="stSelectbox"], [data-testid="stFileUploader"] { touch-action:manipulation !important; }
+          [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input,
+          [data-testid="stSelectbox"], [data-testid="stFileUploader"] { min-width:0 !important; max-width:100% !important; }
+          .stMarkdown table { display:block !important; width:100% !important; overflow-x:auto !important; }
+          .stImage img { max-width:100% !important; height:auto !important; }
+        }
+        @media (max-width: 520px) {
+          [data-testid="stMainBlockContainer"] { padding-top:1.15rem !important; }
+          [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab"] {
+            min-height:44px !important; padding:0 11px !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab"] p { font-size:12px !important; }
+          [data-testid="stSidebar"] {
+            width:min(90vw, 320px) !important; min-width:min(90vw, 320px) !important;
+            max-width:90vw !important;
+          }
+          [data-testid="stNumberInput"] button, [data-testid="stDateInput"] button,
+          [data-testid="stTimeInput"] button { min-width:40px !important; min-height:40px !important; }
+          [data-testid="stFileUploader"] section { padding:12px !important; }
+          [data-testid="stFileUploader"] button { min-height:42px !important; }
+          .st-key-sheet_settings_panel [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important;
+          }
+          .st-key-pool_fallback_grid [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] {
+            flex:1 1 calc(50% - .5rem) !important; width:calc(50% - .5rem) !important;
+            max-width:calc(50% - .5rem) !important; min-width:0 !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has(.st-key-preview_nav_previous) > [data-testid="stColumn"] {
+            flex:1 1 calc(50% - .4rem) !important; width:calc(50% - .4rem) !important;
+            max-width:calc(50% - .4rem) !important;
+          }
+          .st-key-card_preview [data-testid="stHorizontalBlock"]:has(.st-key-preview_nav_previous) > [data-testid="stColumn"]:first-child {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important;
+          }
+          .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] button {
+            min-height:48px !important; padding:8px 4px !important; font-size:11px !important;
+            white-space:normal !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-card_preview .st-key-preview_nav_previous button,
+          .st-key-card_preview .st-key-preview_nav_next button { min-height:44px !important; font-size:10px !important; }
+          .st-key-sheet_canvas_panel [data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > [data-testid="stColumn"] {
+            flex:1 1 100% !important; width:100% !important; max-width:100% !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stMetricValue"] {
+            font-size:clamp(1.05rem,5.2vw,1.45rem) !important;
+            line-height:1.2 !important; white-space:normal !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stMetricLabel"] {
+            font-size:clamp(.75rem,3.3vw,.9rem) !important;
+            white-space:normal !important; overflow-wrap:anywhere !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stRadio"] > div {
+            display:flex !important; flex-wrap:wrap !important; align-items:stretch !important;
+            gap:.35rem .7rem !important; width:100% !important;
+          }
+          .st-key-sheet_canvas_panel [data-testid="stRadio"] label {
+            min-height:44px !important; white-space:normal !important;
+            overflow-wrap:anywhere !important; max-width:100% !important;
+          }
+        }
+          /* Tablets touch: aplica os mesmos alvos ampliados mesmo em larguras acima de 760 px. */
+        @media (pointer: coarse), (max-width: 1024px) {
+          .stButton > button, .stDownloadButton > button,
+          [data-testid="stFormSubmitButton"] button {
+            min-height:50px !important; padding:10px 12px !important;
+            touch-action:manipulation !important;
+          }
+          [data-testid="stRadio"] label {
+            min-height:48px !important; display:flex !important; align-items:center !important;
+            padding:6px 4px !important; touch-action:manipulation !important;
+          }
+          [data-testid="stSegmentedControl"] button {
+            min-height:50px !important; padding:9px 8px !important;
+            touch-action:manipulation !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab-list"] {
+            display:flex !important; flex-wrap:nowrap !important; overflow-x:auto !important;
+            overflow-y:hidden !important; max-width:100% !important;
+            -webkit-overflow-scrolling:touch !important; overscroll-behavior-x:contain !important;
+          }
+          [data-testid="stTabs"] [data-baseweb="tab"] {
+            flex:0 0 auto !important; min-width:max-content !important; min-height:48px !important;
+            touch-action:pan-x !important;
+          }
+          /* Tablets: textos da Folha de Impressao quebram linha mesmo acima de 760 px. */
+          .st-key-card_right, .st-key-sheet_settings_panel, .st-key-sheet_canvas_panel {
+            width:100% !important; max-width:100% !important; min-width:0 !important;
+            overflow-wrap:anywhere !important;
+          }
+          .st-key-card_right [data-testid="stMarkdownContainer"],
+          .st-key-card_right [data-testid="stCaptionContainer"],
+          .st-key-card_right [data-testid="stAlert"],
+          .st-key-sheet_settings_panel [data-testid="stMarkdownContainer"],
+          .st-key-sheet_settings_panel [data-testid="stCaptionContainer"],
+          .st-key-sheet_settings_panel [data-testid="stAlert"],
+          .st-key-sheet_canvas_panel [data-testid="stMarkdownContainer"],
+          .st-key-sheet_canvas_panel [data-testid="stCaptionContainer"],
+          .st-key-sheet_canvas_panel [data-testid="stAlert"] {
+            min-width:0 !important; max-width:100% !important; white-space:normal !important;
+            overflow-wrap:anywhere !important; word-break:normal !important;
+          }
+          .st-key-card_right [data-testid="stMarkdownContainer"] p,
+          .st-key-card_right [data-testid="stCaptionContainer"] p,
+          .st-key-card_right [data-testid="stAlert"] p,
+          .st-key-sheet_settings_panel [data-testid="stMarkdownContainer"] p,
+          .st-key-sheet_settings_panel [data-testid="stCaptionContainer"] p,
+          .st-key-sheet_settings_panel [data-testid="stAlert"] p,
+          .st-key-sheet_canvas_panel [data-testid="stMarkdownContainer"] p,
+          .st-key-sheet_canvas_panel [data-testid="stCaptionContainer"] p,
+          .st-key-sheet_canvas_panel [data-testid="stAlert"] p,
+          .st-key-sheet_canvas_panel [data-testid="stMetricLabel"],
+          .st-key-sheet_canvas_panel [data-testid="stMetricValue"],
+          .st-key-sheet_canvas_panel [data-testid="stRadio"] label,
+          .st-key-sheet_canvas_panel [data-testid="stRadio"] [data-testid="stMarkdownContainer"] p {
+            max-width:100% !important; min-width:0 !important; height:auto !important;
+            white-space:normal !important; overflow-wrap:anywhere !important; word-break:normal !important;
+          }
+          [data-testid="stSlider"] [role="slider"] {
+            width:28px !important; height:28px !important; touch-action:none !important;
+          }
+          [data-testid="stNumberInput"] button, [data-testid="stDateInput"] button,
+          [data-testid="stTimeInput"] button, [data-testid="stFileUploader"] button {
+            min-width:44px !important; min-height:48px !important; touch-action:manipulation !important;
+          }
+          [data-testid="stTextInput"] input, [data-testid="stNumberInput"] input {
+            min-height:48px !important; font-size:16px !important;
+          }
+          [data-testid="stSelectbox"] [role="combobox"] { min-height:48px !important; }
+          [data-testid="stSidebar"] .sidebar-brand-logo img {
+            display:block !important; width:100% !important; max-width:220px !important;
+            max-height:24vh !important; height:auto !important; object-fit:contain !important;
+          }
+        }
+        </style>""",
+        unsafe_allow_html=True,
+    )
     brand.render_header()
 
     st.session_state.setdefault("artwork_items", [])
     st.session_state.setdefault("artwork_next_id", 1)
     st.session_state.setdefault("artwork_upload_revision", 0)
+    st.session_state.setdefault("_artwork_upload_processed_signatures", [])
+    # As opcoes antes eram widgets st.checkbox e agora usam botoes com estado
+    # explicito. Os mesmos bool keys sao mantidos para preservar selecoes salvas.
     st.session_state.setdefault("artwork_selected_id", None)
     st.session_state.setdefault("artwork_batch_selected_ids", [])
+    st.session_state.setdefault("_artwork_batch_panel_reset_version", 0)
+    if st.session_state.pop("_pool_fallback_batch_clear_pending", False):
+        for artwork_entry in st.session_state.get("artwork_items", []):
+            fallback_key = f"pool_batch_select_{int(artwork_entry.get('id', -1))}"
+            if fallback_key in st.session_state:
+                st.session_state[fallback_key] = False
     _normalize_artwork_item_ids()
 
     # Toda a ferramenta permanece em uma única sessão: a folha de impressão.
@@ -4490,6 +6620,8 @@ def main():
         size_key = st.selectbox(
             "Tamanho do botton", size_options, key="single_size",
             on_change=_commit_selected_artwork_before_size_change,
+            filter_mode=None,
+            accept_new_options=False,
         )
         base_spec = BUTTONS[size_key]
         cut_overrides = st.session_state.setdefault("_cut_diameter_overrides", {})
@@ -4505,7 +6637,7 @@ def main():
             )
 
         st.number_input(
-            "Diâmetro da Guia de Corte (mm)",
+            "Diâmetro da guia magenta · Corte (mm)",
             min_value=float(base_spec.fold),
             max_value=float(base_spec.cut) + 5.0,
             step=0.5,
@@ -4581,10 +6713,45 @@ def main():
     st.session_state["_recommended_margin"] = recommended_margin
     st.session_state["_recommended_gap"] = recommended_gap
     profile_key = layout_settings_profile_key(paper, page_w, page_h, size_key, spec.shape)
-    if st.session_state.get("_layout_profile_key") != profile_key:
+
+    # Migração única da folha: versões intermediárias podiam armazenar 5/3 mm
+    # como se fossem valores escolhidos pelo usuário. O primeiro pacote publicado
+    # calculava recomendações específicas por papel e tamanho do botton. Nesta
+    # revisão, descartamos somente esse cache legado uma vez e voltamos a usar
+    # recommend_single_layout() como fonte dos padrões de cada perfil. Depois
+    # disso, qualquer alteração manual continua sendo salva por perfil.
+    layout_profile_schema = 2
+    if int(st.session_state.get("_layout_profile_schema", 0) or 0) < layout_profile_schema:
+        st.session_state["_layout_profiles"] = {}
+        st.session_state.pop("_layout_profile_key", None)
+        st.session_state["_layout_profile_schema"] = layout_profile_schema
         st.session_state["margin_mm"] = recommended_margin
         st.session_state["gap_mm"] = recommended_gap
-        st.session_state["layout_label"] = "Hexagonal (mais compacta)" if recommended_mode == "hex" else "Grade"
+        st.session_state["layout_label"] = (
+            "Hexagonal (mais compacta)" if recommended_mode == "hex" else "Grade"
+        )
+
+    saved_layout_profiles = st.session_state.setdefault("_layout_profiles", {})
+    previous_profile_key = st.session_state.get("_layout_profile_key")
+    if previous_profile_key != profile_key:
+        # Salva a configuração do perfil anterior antes de carregar/sugerir a nova.
+        if previous_profile_key is not None:
+            saved_layout_profiles[previous_profile_key] = {
+                "margin_mm": float(st.session_state.get("margin_mm", recommended_margin)),
+                "gap_mm": float(st.session_state.get("gap_mm", recommended_gap)),
+                "layout_label": str(st.session_state.get("layout_label", "Grade")),
+            }
+        remembered = saved_layout_profiles.get(profile_key)
+        if isinstance(remembered, dict):
+            st.session_state["margin_mm"] = float(remembered.get("margin_mm", recommended_margin))
+            st.session_state["gap_mm"] = float(remembered.get("gap_mm", recommended_gap))
+            st.session_state["layout_label"] = str(
+                remembered.get("layout_label", "Hexagonal (mais compacta)" if recommended_mode == "hex" else "Grade")
+            )
+        else:
+            st.session_state["margin_mm"] = recommended_margin
+            st.session_state["gap_mm"] = recommended_gap
+            st.session_state["layout_label"] = "Hexagonal (mais compacta)" if recommended_mode == "hex" else "Grade"
         st.session_state["_layout_profile_key"] = profile_key
 
     layout_options = ["Grade"] + (["Hexagonal (mais compacta)"] if spec.shape == "circle" else [])
@@ -4593,114 +6760,197 @@ def main():
     margin = float(st.session_state.get("margin_mm", recommended_margin))
     gap = float(st.session_state.get("gap_mm", recommended_gap))
     layout_label = st.session_state.get("layout_label", layout_options[0])
+    saved_layout_profiles[profile_key] = {
+        "margin_mm": margin,
+        "gap_mm": gap,
+        "layout_label": layout_label,
+    }
     mode = "grid" if layout_label == "Grade" else "hex"
     guides = tuple(g.key for g in GUIDES if bool(st.session_state.get(f"guide_single_{g.key}", g.key == "cut")))
 
     # ---------------- Pool de artes ----------------
     brand.section_title(None, "ARTES DA IMPRESSÃO", brand.CYAN)
     upload_revision = st.session_state["artwork_upload_revision"]
-    with st.expander("＋ Adicionar imagens", expanded=(len(st.session_state["artwork_items"]) == 0)):
-        with st.form(f"upload_artworks_{upload_revision}", clear_on_submit=True):
+    with st.expander(
+        "＋ Adicionar imagens",
+        expanded=(len(st.session_state["artwork_items"]) == 0),
+    ):
+        # O uploader nativo do Streamlit continua sendo o caminho padrão e único
+        # desta área. A seleção fica retida até a confirmação; se um arquivo falhar
+        # na leitura local, os demais são aproveitados e o usuário pode tentar
+        # novamente sem reenviar os que já entraram no Pool.
+        with st.form(f"upload_artworks_{upload_revision}", clear_on_submit=False):
             uploaded_files = st.file_uploader(
                 "Selecione uma ou várias artes",
                 type=["png", "jpg", "jpeg", "webp"],
                 accept_multiple_files=True,
-                help="Cada arquivo será adicionado como uma arte independente. Depois, defina quantas cópias de cada uma deseja imprimir.",
+                max_upload_size=200,
+                key=f"artwork_file_uploader_{upload_revision}",
+                help=(
+                    "Cada arquivo será adicionado como uma arte independente. "
+                    "Em alguns celulares/tablets, o seletor do próprio sistema pode limitar a seleção múltipla; "
+                    "nesse caso, adicione as imagens em etapas menores e confirme cada seleção. Se o seletor abrir outro aplicativo, retorne ao navegador sem fechar a página do editor."
+                ),
             )
-            add_uploads = st.form_submit_button("Adicionar imagens à lista", type="primary", use_container_width=True)
+            add_uploads = st.form_submit_button(
+                "Adicionar imagens à lista", type="primary", use_container_width=True
+            )
+
+        st.caption(
+            "No celular ou tablet, o seletor de arquivos pode levar alguns segundos para retornar ao navegador. "
+            "A sessão do editor foi configurada para tolerar esse intervalo."
+        )
+
         if add_uploads:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
             added_ids = []
             existing_ids_before_upload = {int(item["id"]) for item in st.session_state["artwork_items"]}
             selected_before_upload = st.session_state.get("artwork_selected_id")
-            files_to_prepare = [
-                (uploaded_file.name, uploaded_file.getvalue())
-                for uploaded_file in (uploaded_files or [])
-            ]
-            prepared = [None] * len(files_to_prepare)
+            processed_signatures = set(st.session_state.get("_artwork_upload_processed_signatures", []))
+            files_to_prepare = []
             failures = []
-            progress = st.progress(0, text="Preparando miniaturas…") if files_to_prepare else None
-            if files_to_prepare:
-                # Dois workers equilibram paralelismo e memória ao lidar com
-                # fotos grandes; a decodificação reduzida de JPEG evita abrir
-                # megapixels desnecessários para miniaturas pequenas.
-                with ThreadPoolExecutor(max_workers=min(2, len(files_to_prepare))) as executor:
-                    future_indexes = {
-                        executor.submit(prepare_uploaded_artwork, name, data): index
-                        for index, (name, data) in enumerate(files_to_prepare)
-                    }
-                    completed = 0
-                    for future in as_completed(future_indexes):
-                        index = future_indexes[future]
-                        try:
-                            prepared[index] = future.result()
-                        except Exception as exc:
-                            failures.append((index, str(exc)))
-                        completed += 1
-                        progress.progress(
-                            completed / len(files_to_prepare),
-                            text=f"Preparando miniaturas… {completed}/{len(files_to_prepare)}",
+
+            # A leitura é isolada por arquivo. Um item vazio/inacessível enviado
+            # pelo seletor móvel não deve invalidar os outros arquivos do lote.
+            for uploaded_file in (uploaded_files or []):
+                file_name = str(getattr(uploaded_file, "name", "imagem"))
+                try:
+                    image_bytes = uploaded_file.getvalue()
+                    if not image_bytes:
+                        raise ValueError(
+                            "O dispositivo retornou um arquivo vazio. Selecione a imagem novamente no app Arquivos ou Galeria."
                         )
-                progress.empty()
+                    digest = hashlib.sha256(image_bytes).hexdigest()
+                    signature = f"{file_name}|{len(image_bytes)}|{digest}"
+                    if signature in processed_signatures:
+                        continue
+                    files_to_prepare.append((file_name, image_bytes, digest, signature))
+                except Exception as exc:
+                    failures.append((file_name, str(exc) or "Não foi possível ler o arquivo enviado."))
 
-            used_item_ids = {int(item.get("id", -1)) for item in st.session_state["artwork_items"]}
-            next_id = max(int(st.session_state.get("artwork_next_id", 1)), max(used_item_ids, default=0) + 1)
-            for index, (file_name, image_bytes) in enumerate(files_to_prepare):
-                prepared_item = prepared[index]
-                if prepared_item is None:
-                    continue
-                digest, thumb_url = prepared_item
-                item_id = next_id
-                next_id += 1
-                st.session_state["artwork_items"].append({
-                    "id": item_id,
-                    "name": file_name,
-                    "image": image_bytes,
-                    "image_digest": digest,
-                    "thumbnail_data_url": thumb_url,
-                    "qty": 1,
-                    "edit": {
-                        # Regra inicial: toda nova arte começa em Preencher até o Corte.
-                        # Um gesto manual desativa explicitamente esse preset.
-                        "zoom": 1.0,
-                        "initial_safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
-                        "offset_x": 0.0,
-                        "offset_y": 0.0,
-                        "transform_revision": 0,
-                        "event_seq": 0,
-                        "fit_basis_mode": "cut",
-                        "fit_cut_checked": True,
-                        "fit_art_checked": False,
-                        "manual_transform_active": False,
-                        "scale_reference_spec": _button_scale_profile(spec),
-                        "scale_reference_diameter": float(spec.safe),
-                        "safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
-                        "safety_relative_offset_x": 0.0,
-                        "safety_relative_offset_y": 0.0,
-                        "safety_transform_schema": 1,
-                        "initial_cut_fit_schema": 4,
-                        "background_mode": "Cor sólida",
-                        "blur_strength": 0.5,
-                        "background": "#FFFFFF",
-                    },
-                })
-                added_ids.append(item_id)
-            st.session_state["artwork_next_id"] = next_id
+            if not uploaded_files:
+                st.warning(
+                    "Nenhuma imagem chegou ao editor. Volte ao seletor do dispositivo, confirme a seleção e tente novamente."
+                )
+            else:
+                prepared = [None] * len(files_to_prepare)
+                progress = st.progress(0, text="Preparando miniaturas…") if files_to_prepare else None
+                if files_to_prepare:
+                    # Dois workers equilibram paralelismo e memória ao lidar com
+                    # fotos grandes; cada falha é isolada para preservar os demais.
+                    with ThreadPoolExecutor(max_workers=min(2, len(files_to_prepare))) as executor:
+                        future_indexes = {
+                            executor.submit(prepare_uploaded_artwork, name, data): index
+                            for index, (name, data, _digest, _signature) in enumerate(files_to_prepare)
+                        }
+                        completed = 0
+                        for future in as_completed(future_indexes):
+                            index = future_indexes[future]
+                            try:
+                                prepared[index] = future.result()
+                            except Exception as exc:
+                                file_name = files_to_prepare[index][0]
+                                failures.append((file_name, str(exc) or "Formato de imagem inválido."))
+                            completed += 1
+                            progress.progress(
+                                completed / len(files_to_prepare),
+                                text=f"Preparando miniaturas… {completed}/{len(files_to_prepare)}",
+                            )
+                    progress.empty()
 
-            if added_ids and selected_before_upload not in existing_ids_before_upload:
-                st.session_state["artwork_selected_id"] = added_ids[0]
-            if failures:
-                st.warning(f"{len(failures)} arquivo(s) não puderam ser lidos como imagem e foram ignorados.")
-            st.session_state["artwork_upload_revision"] += 1
-            st.rerun()
+                used_item_ids = {int(item.get("id", -1)) for item in st.session_state["artwork_items"]}
+                next_id = max(int(st.session_state.get("artwork_next_id", 1)), max(used_item_ids, default=0) + 1)
+                for index, (file_name, image_bytes, digest, signature) in enumerate(files_to_prepare):
+                    prepared_item = prepared[index]
+                    if prepared_item is None:
+                        continue
+                    thumb_digest, thumb_url = prepared_item
+                    item_id = next_id
+                    next_id += 1
+                    st.session_state["artwork_items"].append({
+                        "id": item_id,
+                        "name": file_name,
+                        "image": image_bytes,
+                        "image_digest": thumb_digest or digest,
+                        "original_image": image_bytes,
+                        "original_image_digest": thumb_digest or digest,
+                        "thumbnail_data_url": thumb_url,
+                        "qty": 1,
+                        "edit": {
+                            # Regra inicial: toda nova arte começa em Preencher até o Corte.
+                            # Um gesto manual desativa explicitamente esse preset.
+                            "zoom": 1.0,
+                            "initial_safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
+                            "offset_x": 0.0,
+                            "offset_y": 0.0,
+                            "transform_revision": 0,
+                            "event_seq": 0,
+                            "fit_basis_mode": "cut",
+                            "fit_cut_checked": True,
+                            "fit_art_checked": False,
+                            "manual_transform_active": False,
+                            "scale_reference_spec": _button_scale_profile(spec),
+                            "scale_reference_diameter": float(spec.safe),
+                            "safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
+                            "safety_relative_offset_x": 0.0,
+                            "safety_relative_offset_y": 0.0,
+                            "safety_transform_schema": 1,
+                            "initial_cut_fit_schema": 4,
+                            "background_mode": "Cor sólida",
+                            "blur_strength": 0.5,
+                            "background": "#FFFFFF",
+                            "blur_base_color": "#FFFFFF",
+                            "background_image_bytes": None,
+                            "background_image_digest": "",
+                            "background_image_name": "",
+                            "custom_background_active": False,
+                            "custom_background_pending": False,
+                            "background_upload_revision": 0,
+                            "custom_background_revision": 0,
+                            **IMAGE_ADJUSTMENT_DEFAULTS,
+                        },
+                    })
+                    added_ids.append(item_id)
+                    processed_signatures.add(signature)
+
+                st.session_state["artwork_next_id"] = next_id
+                st.session_state["_artwork_upload_processed_signatures"] = sorted(processed_signatures)
+
+                if added_ids and selected_before_upload not in existing_ids_before_upload:
+                    st.session_state["artwork_selected_id"] = added_ids[0]
+
+                if failures:
+                    st.warning(
+                        f"{len(failures)} arquivo(s) apresentaram problema. Os arquivos válidos foram adicionados; "
+                        "os que falharam continuam no seletor para nova tentativa."
+                    )
+                    with st.expander("Ver arquivos que precisam de atenção", expanded=True):
+                        for file_name, reason in failures:
+                            st.error(f"{file_name}: {reason}")
+                else:
+                    # Só limpa o seletor quando todos os arquivos pendentes foram
+                    # processados. Isso evita perder a lista se um arquivo falhar.
+                    st.session_state["artwork_upload_revision"] += 1
+                    st.session_state["_artwork_upload_processed_signatures"] = []
+                    if added_ids:
+                        st.toast(f"{len(added_ids)} imagem(ns) adicionada(s) ao Pool.", icon="✅")
+                    st.rerun()
 
         _render_mobile_upload_panel(spec)
+
+    if isinstance(st.session_state.get("_mobile_upload_session"), dict):
+        _mobile_upload_inbox_monitor(spec)
 
     art_items = st.session_state["artwork_items"]
     batch_notice = st.session_state.pop("_artwork_batch_notice", None)
     if batch_notice:
         st.toast(batch_notice, icon="✅")
+    batch_errors = st.session_state.pop("_artwork_batch_errors", [])
+    if batch_errors:
+        with st.expander(f"Detalhes de processamento ({len(batch_errors)} erro(s))", expanded=True):
+            for error in batch_errors:
+                st.warning(error)
     pool_delete_notice = st.session_state.pop("_pool_delete_notice", None)
     if pool_delete_notice:
         st.toast(pool_delete_notice, icon="✅")
@@ -4710,12 +6960,19 @@ def main():
             int(value) for value in st.session_state.get("artwork_batch_selected_ids", [])
             if int(value) in current_pool_ids
         ]
+    editor_navigation_target = st.session_state.pop("_editor_navigation_target_id", None)
+    try:
+        editor_navigation_target = int(editor_navigation_target) if editor_navigation_target is not None else None
+    except (TypeError, ValueError):
+        editor_navigation_target = None
+
     if art_items:
         # Inicializa/migra TODAS as artes antes de o Pool permitir alternar
         # entre miniaturas. Assim, a segunda/terceira imagem não depende de
         # ser selecionada uma primeira vez para receber seu preset canônico.
         for artwork_entry in art_items:
             ensure_artwork_edit_state(artwork_entry, spec, sync_session=False)
+            _sync_processed_artwork(artwork_entry)
 
         saved_pool_state = st.session_state.get("artwork_pool_ui")
         skip_saved_quantities = bool(st.session_state.pop("_skip_saved_pool_quantities_once", False))
@@ -4748,7 +7005,7 @@ def main():
             except (TypeError, ValueError):
                 saved_selected = None
             remaining_ids = {int(item["id"]) for item in st.session_state["artwork_items"]}
-            if saved_selected in remaining_ids:
+            if saved_selected in remaining_ids and editor_navigation_target is None:
                 previous_selected = st.session_state.get("artwork_selected_id")
                 if previous_selected is not None and int(previous_selected) != saved_selected:
                     # Persiste a arte anterior antes de trocar o prefixo dos
@@ -4760,6 +7017,9 @@ def main():
                 st.session_state["artwork_selected_id"] = saved_selected
 
         art_items = st.session_state["artwork_items"]
+        current_ids_int = [int(item["id"]) for item in art_items]
+        if editor_navigation_target in current_ids_int:
+            st.session_state["artwork_selected_id"] = editor_navigation_target
         pool_positions = compute_layout(page_w, page_h, spec.cut, margin, gap, mode)
         pool_page_capacity = len(pool_positions)
         current_ids = [str(item["id"]) for item in art_items]
@@ -4779,13 +7039,50 @@ def main():
         pool_selected = str(st.session_state["artwork_selected_id"])
         st.markdown(
             """
-            <div style="background:rgba(24,54,79,.34);border:1px solid rgba(110,151,182,.28);border-radius:10px;padding:10px 12px;margin:0 0 12px;color:#D9E5EF;">
-              <div style="font-size:10px;font-weight:800;letter-spacing:.09em;color:#8FC9D8;margin-bottom:8px;">COMO USAR O POOL</div>
-              <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(185px,1fr));gap:9px 16px;">
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Editar</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Clique na miniatura para abrir a arte no editor.</div></div>
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Selecionar e excluir</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Marque as caixas para selecionar artes. O botão ao lado exclui a seleção ou, sem seleção, todo o Pool.</div></div>
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Aplicar ajustes em lote</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Use a caixa em Ajustes Gerais da Arte. Zoom e posição manuais continuam individuais.</div></div>
-                <div><div style="font-size:12px;font-weight:750;color:#F3F7FA;margin-bottom:3px;">Quantidade e ordem</div><div style="font-size:11px;line-height:1.4;color:#B9CAD8;">Digite a quantidade ou use +/−. Arraste as miniaturas para ordenar a impressão.</div></div>
+            <style>
+              .pool-guide{margin:0 0 13px;padding:15px 16px 14px;border:1px solid rgba(91,127,160,.34);
+                border-radius:15px;background:linear-gradient(135deg,rgba(18,41,65,.94),rgba(13,27,44,.96));
+                box-shadow:0 8px 24px rgba(0,0,0,.15);color:#EAF1F7}
+              .pool-guide-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;flex-wrap:wrap;margin-bottom:13px}
+              .pool-guide-kicker{font-size:9px;font-weight:900;letter-spacing:.16em;color:#8FC9D8;margin-bottom:4px}
+              .pool-guide-title{font-size:17px;line-height:1.2;font-weight:850;color:#F7FAFD}
+              .pool-guide-subtitle{font-size:11px;line-height:1.45;color:#B5C5D4;margin-top:4px;max-width:610px}
+              .pool-guide-legend{display:flex;flex-wrap:wrap;gap:8px}
+              .pool-guide-key{display:flex;align-items:center;gap:8px;min-width:180px;padding:8px 10px;
+                border:1px solid rgba(128,157,184,.22);border-radius:10px;background:rgba(5,17,31,.42)}
+              .pool-guide-key b{display:block;font-size:10px;color:#F3F7FB;line-height:1.25}
+              .pool-guide-key small{display:block;font-size:9px;line-height:1.35;color:#AFC0D0;margin-top:2px}
+              .pool-guide-focus{width:22px;height:22px;flex:none;border:2px solid #2DBB72;border-radius:6px;background:#102D35;
+                box-shadow:0 0 0 2px rgba(45,187,114,.13)}
+              .pool-guide-check{width:19px;height:19px;flex:none;display:grid;place-items:center;border:1px solid #fff;
+                border-radius:6px;background:#26C6DA;color:#061B2D;font-size:12px;font-weight:950}
+              .pool-guide-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(175px,1fr));gap:8px}
+              .pool-guide-item{display:flex;gap:9px;align-items:flex-start;min-width:0;padding:9px 10px;
+                border:1px solid rgba(111,146,176,.18);border-radius:10px;background:rgba(5,17,31,.28)}
+              .pool-guide-no{width:22px;height:22px;display:grid;place-items:center;flex:none;border-radius:7px;
+                color:#071827;background:linear-gradient(135deg,#1BA9D8,#6BC5D8);font-size:9px;font-weight:950}
+              .pool-guide-item > div b{display:block;font-size:10px;line-height:1.3;color:#F2F6FA;margin:0 0 3px}
+              .pool-guide-item > div span{display:block;font-size:9px;line-height:1.42;color:#B5C4D2}
+              @media(max-width:650px){.pool-guide{padding:12px}.pool-guide-key{min-width:100%;flex:1}.pool-guide-grid{grid-template-columns:1fr 1fr}}
+              @media(max-width:430px){.pool-guide-grid{grid-template-columns:1fr}}
+            </style>
+            <div class="pool-guide">
+              <div class="pool-guide-head">
+                <div>
+                  <div class="pool-guide-kicker">GUIA RÁPIDA · POOL DE ARTES</div>
+                  <div class="pool-guide-title">Como usar o Pool</div>
+                  <div class="pool-guide-subtitle">O Pool reúne as imagens da produção. O contorno verde e a caixa azul têm funções diferentes:</div>
+                </div>
+                <div class="pool-guide-legend">
+                  <div class="pool-guide-key"><span class="pool-guide-focus"></span><span><b>Foco de edição</b><small>Moldura verde: arte aberta na prévia para edição individual.</small></span></div>
+                  <div class="pool-guide-key"><span class="pool-guide-check">✓</span><span><b>Selecionada para ações</b><small>Caixa azul: inclui a arte nos ajustes em lote e na remoção por IA.</small></span></div>
+                </div>
+              </div>
+              <div class="pool-guide-grid">
+                <div class="pool-guide-item"><span class="pool-guide-no">01</span><div><b>Abrir e editar</b><span>Clique na miniatura para colocá-la em foco. A moldura verde identifica qual arte está aberta na prévia.</span></div></div>
+                <div class="pool-guide-item"><span class="pool-guide-no">02</span><div><b>Selecionar para ações em lote</b><span>Use a caixa azul no canto inferior direito. A seleção é independente do foco; a arte em foco só entra no lote se sua caixa azul estiver marcada.</span></div></div>
+                <div class="pool-guide-item"><span class="pool-guide-no">03</span><div><b>Quantidade e ordem de impressão</b><span>Digite a quantidade ou use −/+. Arraste pelo ícone de alça para reorganizar a sequência de impressão.</span></div></div>
+                <div class="pool-guide-item"><span class="pool-guide-no">04</span><div><b>Selecionar, completar ou excluir</b><span>Use “Selecionar todas” para marcar o Pool. “Preencher folha” completa as posições restantes; excluir seleção remove as marcadas, e sem seleção o botão oferece excluir todas.</span></div></div>
               </div>
             </div>
             """,
@@ -4856,11 +7153,19 @@ def main():
                     result_selected = int(result_selected)
                 except (TypeError, ValueError):
                     result_selected = None
-            if result_selected in current_ids_int:
+            if editor_navigation_target in current_ids_int:
+                # A navegação anterior/próxima tem prioridade sobre um valor
+                # selecionado antigo ainda devolvido pelo componente do Pool.
+                st.session_state["artwork_selected_id"] = editor_navigation_target
+            elif result_selected in current_ids_int:
                 st.session_state["artwork_selected_id"] = result_selected
 
             result_batch_ids = getattr(pool_result, "selected_ids", None)
-            if isinstance(result_batch_ids, (list, tuple, set)):
+            if st.session_state.pop("_pool_component_batch_clear_pending", False):
+                # O resultado devolvido nesta execução ainda pode conter a
+                # seleção anterior; o estado Python já foi limpo após sucesso.
+                st.session_state["artwork_batch_selected_ids"] = []
+            elif isinstance(result_batch_ids, (list, tuple, set)):
                 valid_batch_ids = set(current_ids_int)
                 clean_batch_ids = []
                 for value in result_batch_ids:
@@ -4873,6 +7178,8 @@ def main():
                 st.session_state["artwork_batch_selected_ids"] = clean_batch_ids
 
         except (AttributeError, TypeError, RuntimeError) as exc:
+            if st.session_state.pop("_pool_component_batch_clear_pending", False):
+                st.session_state["artwork_batch_selected_ids"] = []
             st.caption("Ordenação por arraste indisponível nesta instalação; use as setas para reorganizar.")
             fallback_items = list(st.session_state["artwork_items"])
             fallback_ids = [int(item["id"]) for item in fallback_items]
@@ -4907,56 +7214,60 @@ def main():
                     "Cancelar", key="pool_fallback_cancel_delete",
                     use_container_width=True, on_click=_cancel_fallback_batch_delete,
                 )
-            cards_per_row = 5
-            for row_start in range(0, len(fallback_items), cards_per_row):
-                row_items = fallback_items[row_start:row_start + cards_per_row]
-                columns = st.columns(cards_per_row)
-                for offset, (column, item) in enumerate(zip(columns, row_items)):
-                    index = row_start + offset
-                    with column:
-                        with st.container(border=True):
-                            selected = st.session_state.get("artwork_selected_id") == item["id"]
-                            st.image(item.get("thumbnail_data_url") or make_art_thumbnail(item["image"]), use_container_width=True)
-                            batch_ids = st.session_state.get("artwork_batch_selected_ids", [])
-                            batch_selected = int(item["id"]) in [int(value) for value in batch_ids]
-                            batch_key = f"pool_batch_select_{int(item['id'])}"
-                            st.checkbox("Aplicar ajustes", value=batch_selected, key=batch_key,
-                                        on_change=_sync_fallback_batch_selection, args=(int(item["id"]), batch_key))
-                            if st.button("✓ Prévia" if selected else "Selecionar", key=f"pool_select_{item['id']}", use_container_width=True):
-                                st.session_state["artwork_selected_id"] = item["id"]
-                                st.rerun()
-                            item_id = int(item["id"])
-                            qty_key = f"pool_qty_input_{item_id}"
-                            st.session_state[qty_key] = int(item.get("qty", 1))
-                            counter_cols = st.columns([0.9, 2.2, 0.9])
-                            counter_cols[0].button(
-                                "−", key=f"pool_minus_{item_id}", disabled=int(item.get("qty", 1)) <= 1,
-                                use_container_width=True, on_click=_step_pool_quantity, args=(item_id, -1, qty_key),
-                            )
-                            counter_cols[1].number_input(
-                                "Unidades", min_value=1, max_value=2000, step=1, key=qty_key,
-                                label_visibility="collapsed", on_change=_sync_pool_quantity_from_widget,
-                                args=(item_id, qty_key),
-                            )
-                            counter_cols[2].button(
-                                "+", key=f"pool_plus_{item_id}", disabled=int(item.get("qty", 1)) >= 2000,
-                                use_container_width=True, on_click=_step_pool_quantity, args=(item_id, 1, qty_key),
-                            )
-                            action_cols = st.columns(3)
-                            if action_cols[0].button("↑", key=f"pool_up_{item['id']}", disabled=index == 0, use_container_width=True):
-                                items = st.session_state["artwork_items"]
-                                items[index - 1], items[index] = items[index], items[index - 1]
-                                st.rerun()
-                            if action_cols[1].button("↓", key=f"pool_down_{item['id']}", disabled=index == len(st.session_state["artwork_items"]) - 1, use_container_width=True):
-                                items = st.session_state["artwork_items"]
-                                items[index + 1], items[index] = items[index], items[index + 1]
-                                st.rerun()
-                            if action_cols[2].button("×", key=f"pool_remove_{item['id']}", help="Remover esta arte", use_container_width=True):
-                                st.session_state["artwork_items"] = [entry for entry in st.session_state["artwork_items"] if entry["id"] != item["id"]]
-                                if selected:
-                                    remaining = st.session_state["artwork_items"]
-                                    st.session_state["artwork_selected_id"] = remaining[0]["id"] if remaining else None
-                                st.rerun()
+            with st.container(key="pool_fallback_grid"):
+                cards_per_row = 5
+                for row_start in range(0, len(fallback_items), cards_per_row):
+                    row_items = fallback_items[row_start:row_start + cards_per_row]
+                    columns = st.columns(cards_per_row)
+                    for offset, (column, item) in enumerate(zip(columns, row_items)):
+                        index = row_start + offset
+                        with column:
+                            with st.container(border=True):
+                                selected = st.session_state.get("artwork_selected_id") == item["id"]
+                                st.image(item.get("thumbnail_data_url") or make_art_thumbnail(item["image"]), use_container_width=True)
+                                batch_ids = st.session_state.get("artwork_batch_selected_ids", [])
+                                batch_selected = int(item["id"]) in [int(value) for value in batch_ids]
+                                batch_key = f"pool_batch_select_{int(item['id'])}"
+                                render_touch_checkbox(
+                                    "Aplicar ajustes", value=batch_selected, key=batch_key,
+                                    on_change=_sync_fallback_batch_selection,
+                                    args=(int(item["id"]), batch_key),
+                                )
+                                if st.button("✓ Prévia" if selected else "Selecionar", key=f"pool_select_{item['id']}", use_container_width=True):
+                                    st.session_state["artwork_selected_id"] = item["id"]
+                                    st.rerun()
+                                item_id = int(item["id"])
+                                qty_key = f"pool_qty_input_{item_id}"
+                                st.session_state[qty_key] = int(item.get("qty", 1))
+                                counter_cols = st.columns([0.9, 2.2, 0.9])
+                                counter_cols[0].button(
+                                    "−", key=f"pool_minus_{item_id}", disabled=int(item.get("qty", 1)) <= 1,
+                                    use_container_width=True, on_click=_step_pool_quantity, args=(item_id, -1, qty_key),
+                                )
+                                counter_cols[1].number_input(
+                                    "Unidades", min_value=1, max_value=2000, step=1, key=qty_key,
+                                    label_visibility="collapsed", on_change=_sync_pool_quantity_from_widget,
+                                    args=(item_id, qty_key),
+                                )
+                                counter_cols[2].button(
+                                    "+", key=f"pool_plus_{item_id}", disabled=int(item.get("qty", 1)) >= 2000,
+                                    use_container_width=True, on_click=_step_pool_quantity, args=(item_id, 1, qty_key),
+                                )
+                                action_cols = st.columns(3)
+                                if action_cols[0].button("↑", key=f"pool_up_{item['id']}", disabled=index == 0, use_container_width=True):
+                                    items = st.session_state["artwork_items"]
+                                    items[index - 1], items[index] = items[index], items[index - 1]
+                                    st.rerun()
+                                if action_cols[1].button("↓", key=f"pool_down_{item['id']}", disabled=index == len(st.session_state["artwork_items"]) - 1, use_container_width=True):
+                                    items = st.session_state["artwork_items"]
+                                    items[index + 1], items[index] = items[index], items[index + 1]
+                                    st.rerun()
+                                if action_cols[2].button("×", key=f"pool_remove_{item['id']}", help="Remover esta arte", use_container_width=True):
+                                    st.session_state["artwork_items"] = [entry for entry in st.session_state["artwork_items"] if entry["id"] != item["id"]]
+                                    if selected:
+                                        remaining = st.session_state["artwork_items"]
+                                        st.session_state["artwork_selected_id"] = remaining[0]["id"] if remaining else None
+                                    st.rerun()
 
             fallback_total = sum(max(1, int(item.get("qty", 1))) for item in st.session_state["artwork_items"])
             fallback_remaining = remaining_slots_to_fill(pool_page_capacity, fallback_total)
@@ -4978,7 +7289,7 @@ def main():
         st.caption(f"{len(art_items)} arte(s) no pool · {total_art_qty} botton(s) no lote")
    
 
-    # ---------------- Ajustes, preview e exportação PNG da arte em foco ----------------
+    # ---------------- Editor: ferramentas, prévia e exportação PNG ----------------
     selected_item = None
     selected_img = None
     selected_dimensions = None
@@ -4999,502 +7310,1105 @@ def main():
         st.session_state["artwork_selected_id"] = int(selected_item["id"])
         prefix = ensure_artwork_edit_state(selected_item, spec, sync_session=True)
 
-    controls_col, editor_col, legend_col = st.columns([0.92, 1.72, 0.96], gap="medium")
-    with controls_col:
-        with st.container(key="card_left"):
-            brand.section_title(None, "AJUSTES GERAIS DA ARTE", brand.YELLOW)
-            if selected_item is not None:
-                st.caption("Os ajustes abaixo ficam salvos individualmente para a arte selecionada.")
-            else:
-                st.info("Adicione uma arte para liberar os ajustes.")
-
-            st.markdown("**Ajuste da imagem**")
-            if selected_item is not None:
-                fit_mode = render_fit_mode_controls(prefix, int(selected_item["id"]))
-                background_label = st.radio(
-                    "Preenchimento das áreas vazias",
-                    ["Cor sólida", "Imagem desfocada"],
-                    key=f"{prefix}_background_mode",
-                    on_change=make_artwork_settings_callback(int(selected_item["id"]), "background_mode"),
-                    help="O fundo ocupa toda a área interna do corte; a arte ajustada fica por cima.",
-                )
-                background_mode = "blur" if background_label == "Imagem desfocada" else "color"
-                blur_mm = st.slider(
-                    "Intensidade do desfoque", 0.0, 18.0, step=0.1,
-                    key=f"{prefix}_blur_strength",
-                    on_change=make_artwork_settings_callback(int(selected_item["id"]), "blur_strength"),
-                    disabled=(background_mode != "blur"),
-                    help="0 desativa o desfoque; valor inicial: 0,5 mm.",
-                )
-                bg_label = "Cor de base" if background_mode == "blur" else "Cor de fundo"
-                color_key = f"{prefix}_background"
-                bg = st.color_picker(
-                    bg_label, key=color_key,
-                    on_change=make_artwork_settings_callback(int(selected_item["id"]), "background"),
-                )
-                eyedropper_key = f"color_eyedropper_{int(selected_item['id'])}"
-                eyedropper = get_color_eyedropper_component()
-                eyedropper(
-                    data={"current_color": bg},
-                    on_picked_color_change=make_color_eyedropper_callback(
-                        eyedropper_key, color_key, int(selected_item["id"])
-                    ),
-                    key=eyedropper_key,
-                )
-
-                # A aplicação em lote fica junto dos controles de origem. Assim,
-                # ela sempre reutiliza os ajustes visíveis neste mesmo painel.
-                batch_target_ids = [
-                    int(value) for value in st.session_state.get("artwork_batch_selected_ids", [])
-                    if any(int(item.get("id", -1)) == int(value) for item in st.session_state.get("artwork_items", []))
-                ]
-                with st.container(border=True):
-                    st.markdown("**Aplicar ajustes aos selecionados**")
-                    if batch_target_ids:
-                        st.caption(f"Os ajustes desta área serão aplicados a {len(batch_target_ids)} arte(s) marcada(s) no Pool. O zoom e a posição manuais de cada uma serão preservados.")
-                    else:
-                        st.caption("Marque uma ou mais artes diretamente nas miniaturas do Pool para habilitar a aplicação em lote.")
-                    st.button(
-                        "APLICAR AJUSTES AOS SELECIONADOS",
-                        key="general_apply_settings_to_selected_artworks",
-                        type="primary",
-                        use_container_width=True,
-                        disabled=not bool(batch_target_ids),
-                        on_click=_on_pool_apply_selected_fallback,
-                    )
-            else:
-                st.caption("Os controles serão habilitados quando uma arte for selecionada.")
-
+    # Carrega sempre o estado canônico da arte, mesmo quando a aba ativa não é
+    # Enquadrar. Assim a prévia nunca troca temporariamente para valores padrão.
+    has_custom_background = False
+    custom_background_bytes = b""
+    custom_background_digest = ""
     if selected_item is not None:
-        selected_digest = selected_item["image_digest"]
-        # Apenas metadados são lidos em trocas/ajustes; a imagem de produção em
-        # resolução total só é decodificada quando o usuário prepara o PNG/PDF.
-        selected_dimensions = get_image_dimensions(selected_digest, selected_item["image"])
-        # O estado é individual por item; nenhuma arte herda o zoom/posição da anterior.
-        zoom = float(st.session_state[f"{prefix}_zoom"])
-        off_x = float(st.session_state[f"{prefix}_offset_x"])
-        off_y = float(st.session_state[f"{prefix}_offset_y"])
-        blur_mm = float(st.session_state[f"{prefix}_blur_strength"])
-        persist_artwork_edit_state(selected_item, prefix)
+        saved_edit = selected_item.setdefault("edit", {})
+        custom_background_bytes, custom_background_digest = _custom_background_payload(saved_edit)
+        has_custom_background = bool(custom_background_bytes and custom_background_digest)
+        background_label = str(saved_edit.get("background_mode", "Cor sólida"))
+        background_mode = "blur" if background_label == "Imagem desfocada" else "color"
+        if background_label == "Sem preenchimento":
+            bg = "#FFFFFF"
+        else:
+            bg_field = "blur_base_color" if background_label == "Imagem desfocada" else "background"
+            bg = str(saved_edit.get(bg_field, saved_edit.get("background", "#FFFFFF")))
+        fit_mode = str(saved_edit.get("fit_basis_mode", "cut"))
+        blur_mm = float(saved_edit.get("blur_strength", 0.5))
 
-    with editor_col:
-        with st.container(key="card_preview"):
-            brand.section_title(None, "PRÉVIA DE AJUSTE", brand.MAGENTA)
-            if selected_item is not None and selected_dimensions is not None:
-                token = image_editor_token(
-                    selected_item["image"], spec, int(selected_item["id"]), selected_digest
-                )
-                component_key = f"main_visual_image_editor_{int(selected_item['id'])}"
-                token_state_key = f"_{prefix}_expected_token"
-                st.session_state[token_state_key] = token
-                editor_transform = current_editor_transform(component_key, token, prefix)
-                editor = get_image_editor_component()
-                editor_result = editor(
-                    data={
-                        "token": token,
-                        "image": editor_image_data_url(selected_digest, selected_item["image"]),
-                        # O backdrop é caro e desnecessário no modo de cor sólida.
-                        "backdrop_image": (
-                            editor_backdrop_data_url(selected_digest, selected_item["image"], bg)
-                            if background_mode == "blur" else ""
-                        ),
-                        "shape": spec.shape,
-                        "size": spec.size,
-                        "cut": spec.cut,
-                        "fold": spec.fold,
-                        "art": spec.art,
-                        "safe": spec.safe,
-                        "guides": [g.key for g in GUIDES],
-                        "fit_mode": fit_mode,
-                        # Os dois presets restauram a escala-base exata do modo ativo.
-                        # A conversão entre bottons continua sendo calculada pela Segurança.
-                        "initial_zoom": 1.0,
-                        "background_mode": background_mode,
-                        "blur_mm": float(blur_mm),
-                        "bg": bg,
-                        "transform": editor_transform,
-                        "transform_revision": int(editor_transform.get("revision", 0)),
-                    },
-                    default={"transform": editor_transform},
-                    on_transform_change=make_image_editor_sync_callback(
-                        component_key, prefix, token_state_key,
-                        f"{prefix}_fit_cut_checked", f"{prefix}_fit_art_checked",
-                        int(selected_item["id"]),
-                    ),
-                    key=component_key,
-                )
-                apply_image_editor_state(editor_result, token, prefix)
-                zoom = float(st.session_state[f"{prefix}_zoom"])
-                off_x = float(st.session_state[f"{prefix}_offset_x"])
-                off_y = float(st.session_state[f"{prefix}_offset_y"])
-                persist_artwork_edit_state(selected_item, prefix)
+    # Cabeçalho, ajustes em lote e navegação ocupam toda a largura da área de edição.
+    # As abas deixam de disputar espaço com a coluna estreita de controles.
+    with st.container(key="editor_tools_header"):
+        brand.section_title(None, "FERRAMENTAS DE EDIÇÃO", brand.YELLOW)
+        if selected_item is not None:
+            st.caption(f"Arte em foco: {selected_item.get('name', 'Imagem selecionada')}")
+        else:
+            st.info("Adicione uma arte ao Pool para liberar as ferramentas de edição.")
 
-                if fit_mode == "cut":
-                    box = image_box(selected_dimensions[0], selected_dimensions[1], spec.cut, zoom, off_x, off_y)
-                    dpi = min(selected_dimensions) / ((spec.cut * zoom) / 25.4)
-                else:
-                    dpi = max(selected_dimensions) / ((spec.art * zoom) / 25.4)
-                if dpi < 200:
-                    st.warning(f"Resolução efetiva ≈ {dpi:.0f} dpi — a impressão pode ficar pixelada (ideal: 300 dpi).")
-                else:
-                    st.caption(f"Resolução efetiva da arte selecionada ≈ {dpi:.0f} dpi")
-            else:
-                st.info("Selecione uma miniatura no pool para abrir a arte no editor com as guias.")
-
-            # Exportação PNG sob demanda: não renderiza centenas de milhares de
-            # pixels durante cada arraste, clique ou atualização da prévia.
-            if selected_item is not None and selected_dimensions is not None:
-                st.divider()
-                brand.section_title(None, "EXPORTAR ARTE EM FOCO", brand.YELLOW)
-                export_cols = st.columns([1, 2])
-                with export_cols[0]:
-                    dpi_label = st.selectbox(
-                        "Resolução do PNG",
-                        ["300 dpi · alta qualidade", "600 dpi · máxima definição"],
-                        key="focused_art_png_dpi",
+        valid_artwork_ids = {int(item.get("id", -1)) for item in st.session_state.get("artwork_items", [])}
+        batch_target_ids = list(dict.fromkeys(
+            int(value) for value in st.session_state.get("artwork_batch_selected_ids", [])
+            if int(value) in valid_artwork_ids
+        ))
+        batch_auto_expand = len(batch_target_ids) >= 2
+        st.markdown(
+            """<style>
+            .st-key-artwork_batch_expanded_panel {
+                border:1px solid rgba(238,29,126,.60) !important;
+                border-radius:14px !important;
+                padding:12px 14px !important;
+                background:linear-gradient(112deg,rgba(27,169,216,.15),rgba(238,29,126,.13),rgba(245,221,30,.10)) !important;
+                box-shadow:0 7px 22px rgba(0,0,0,.20) !important;
+            }
+            .st-key-artwork_batch_expanded_panel .batch-panel-expanded-title {
+                display:flex;align-items:center;justify-content:space-between;gap:12px;
+                margin:0 0 8px;padding:3px 0;color:#FFFFFF;font-weight:900;
+                letter-spacing:.045em;text-shadow:0 1px 8px rgba(0,0,0,.28);
+            }
+            .st-key-artwork_batch_expanded_panel .batch-panel-expanded-title span {
+                padding:4px 9px;border-radius:999px;background:rgba(8,12,20,.45);
+                border:1px solid rgba(255,255,255,.24);font-size:11px;white-space:nowrap;
+            }
+            [class*="st-key-artwork_batch_panel_"] [data-testid="stExpander"] {
+                border:1px solid rgba(238,29,126,.60) !important;
+                border-radius:14px !important;
+                overflow:hidden !important;
+                background:linear-gradient(112deg,rgba(27,169,216,.15),rgba(238,29,126,.13),rgba(245,221,30,.10)) !important;
+                box-shadow:0 7px 22px rgba(0,0,0,.20);
+            }
+            [class*="st-key-artwork_batch_panel_"] [data-testid="stExpander"] summary {
+                background:linear-gradient(90deg,rgba(27,169,216,.20),rgba(238,29,126,.17),rgba(245,221,30,.13)) !important;
+                border-bottom:1px solid rgba(238,29,126,.24);
+            }
+            [class*="st-key-artwork_batch_panel_"] [data-testid="stExpander"] summary p {
+                color:#FFFFFF !important;font-weight:850 !important;letter-spacing:.045em !important;
+                text-shadow:0 1px 8px rgba(0,0,0,.28);
+            }
+            [class*="st-key-artwork_batch_panel_"] [data-testid="stExpander"] summary svg {
+                color:#F5DD1E !important;
+            }
+            [class*="st-key-artwork_batch_panel_"] [data-testid="stExpander"] [data-testid="stExpanderDetails"] {
+                background:rgba(8,12,20,.30);
+            }
+            </style>""",
+            unsafe_allow_html=True,
+        )
+        batch_panel_revision = int(st.session_state.get("_artwork_batch_panel_reset_version", 0) or 0)
+        with st.container(key=f"artwork_batch_panel_{batch_panel_revision}"):
+            def render_batch_controls():
+                selected_count = len(batch_target_ids)
+                if selected_count:
+                    st.caption(
+                        f"{selected_count} arte(s) selecionada(s) no Pool. "
+                        "As ações serão aplicadas somente às artes marcadas, inclusive à arte em foco quando ela estiver selecionada."
                     )
-                    dpi_export = 600 if dpi_label.startswith("600") else 300
-                png_signature_data = (
-                    int(selected_item["id"]), selected_item["image_digest"],
-                    spec.shape, spec.size, spec.cut, spec.art, dpi_export,
-                    round(float(zoom), 6), round(float(off_x), 5), round(float(off_y), 5),
-                    bg, fit_mode, background_mode, round(float(blur_mm), 4),
-                )
-                png_signature = hashlib.sha256(repr(png_signature_data).encode("utf-8")).hexdigest()
-                with export_cols[0]:
-                    prepare_png = st.button(
-                        "Preparar PNG",
-                        key=f"prepare_focused_art_png_{int(selected_item['id'])}",
-                        type="primary",
-                        use_container_width=True,
-                    )
-                if prepare_png:
-                    with st.spinner("Preparando PNG da arte selecionada em resolução original…"):
-                        production_image = load_image(
-                            selected_item["image"], bg, image_digest=selected_digest
+                else:
+                    st.info("Marque no mínimo uma arte no Pool para habilitar as operações em lote.")
+
+                # Inicializa as opções novas sem herdar seleções antigas da v3.28.
+                batch_defaults = {
+                    "batch_apply_framing_cut": False,
+                    "batch_apply_framing_art": False,
+                    "batch_apply_blur": False,
+                    "batch_apply_solid_color": False,
+                    "batch_blur_strength": BATCH_BLUR_DEFAULT,
+                    "batch_blur_base_color": st.session_state.get("batch_background_color", BATCH_BACKGROUND_DEFAULT),
+                    "batch_solid_background_color": st.session_state.get("batch_background_color", BATCH_BACKGROUND_DEFAULT),
+                    "batch_apply_custom_background": False,
+                }
+                for key, default_value in batch_defaults.items():
+                    st.session_state.setdefault(key, default_value)
+                # Corrige combinações incompatíveis que possam ter ficado salvas
+                # de uma sessão anterior antes de renderizar as caixas.
+                _normalise_batch_priority_state(st.session_state)
+
+                left_col, right_col = st.columns(2, gap="medium")
+                with left_col:
+                    with st.container(border=True):
+                        st.markdown("**ENQUADRAMENTO**")
+                        st.caption("Preencher até o corte elimina fundos e bordas. Encaixar na área da arte permite exibi-los.")
+                        render_touch_checkbox(
+                            "Preencher até o corte", key="batch_apply_framing_cut",
+                            on_change=_batch_framing_cut_changed,
+                            help="A imagem cobre toda a área até a guia Corte e desativa desfoque, cor sólida e fundo personalizado.",
                         )
-                        clean_png, png_size = build_button_art_png(
-                            spec, production_image, dpi=dpi_export, zoom=zoom,
-                            off_x=off_x, off_y=off_y, bg=bg, fit_mode=fit_mode,
-                            background_mode=background_mode, blur_mm=float(blur_mm),
+                        render_touch_checkbox(
+                            "Encaixar na área da arte", key="batch_apply_framing_art",
+                            on_change=_batch_framing_art_changed,
+                            help="Ativa o preset da guia Arte. Se desmarcado, o lote mantém o enquadramento livre/manual; preenchimentos continuam disponíveis.",
                         )
-                    shape_label = "quadrado" if spec.shape == "square" else "redondo"
-                    size_label = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
-                    st.session_state["focused_art_png_export"] = {
-                        "signature": png_signature,
-                        "bytes": clean_png,
-                        "size": png_size,
-                        "name": f"arte_botton_{shape_label}_{size_label}_{dpi_export}dpi.png",
-                        "dpi": dpi_export,
-                    }
-                cached_png = st.session_state.get("focused_art_png_export")
-                with export_cols[1]:
-                    if cached_png and cached_png.get("signature") == png_signature:
-                        transparency_label = "círculo com transparência externa" if spec.shape == "circle" else "quadrado opaco"
+
+                    with st.container(border=True):
+                        st.markdown("**PREENCHIMENTO DAS ÁREAS VAZIAS**")
+                        st.caption("Desfoque e cor sólida são alternativas entre si e substituem o fundo personalizado.")
+                        render_touch_checkbox(
+                            "Aplicar desfoque", key="batch_apply_blur",
+                            on_change=_batch_fill_blur_changed,
+                            help="Ativa o desfoque e desativa cor sólida/fundo personalizado. Cada arte passa a exibir o preenchimento sem perder o enquadramento manual.",
+                        )
+                        if bool(st.session_state.get("batch_apply_blur", False)):
+                            st.slider(
+                                "Intensidade do desfoque",
+                                0.0, 18.0, step=0.1,
+                                key="batch_blur_strength",
+                                help="Define a intensidade do desfoque aplicada a todas as artes marcadas.",
+                            )
+                            st.markdown("**Cor de base**")
+                            batch_blur_picker_key = "batch_blur_base_color_picker"
+                            get_artwork_integrated_color_picker_component()(
+                                data={"color": str(st.session_state.get("batch_blur_base_color", BATCH_BACKGROUND_DEFAULT))},
+                                on_color_change=make_batch_color_picker_callback(
+                                    batch_blur_picker_key, "batch_blur_base_color"
+                                ),
+                                key=batch_blur_picker_key,
+                            )
+                        render_touch_checkbox(
+                            "Aplicar cor sólida", key="batch_apply_solid_color",
+                            on_change=_batch_fill_color_changed,
+                            help="Aplica uma cor uniforme, desativa desfoque/fundo personalizado e ativa a área da arte quando necessário.",
+                        )
+                        if bool(st.session_state.get("batch_apply_solid_color", False)):
+                            st.markdown("**Selecione a cor:**")
+                            batch_solid_picker_key = "batch_solid_background_color_picker"
+                            get_artwork_integrated_color_picker_component()(
+                                data={"color": str(st.session_state.get("batch_solid_background_color", BATCH_BACKGROUND_DEFAULT))},
+                                on_color_change=make_batch_color_picker_callback(
+                                    batch_solid_picker_key, "batch_solid_background_color"
+                                ),
+                                key=batch_solid_picker_key,
+                            )
+
+                with right_col:
+                    with st.container(border=True):
+                        st.markdown("**FUNDO PERSONALIZADO**")
+                        st.caption("O fundo personalizado substitui desfoque/cor. Cada arte passa a exibir a borda, preservando o enquadramento manual quando existente.")
+                        render_touch_checkbox(
+                            "Aplicar Fundo Personalizado", key="batch_apply_custom_background",
+                            on_change=_batch_custom_background_checkbox_changed,
+                            help="Aplica a imagem como borda e desativa desfoque/cor sólida, preservando os ajustes manuais de cada arte.",
+                        )
+                        batch_background_payload = None
+                        batch_background_error = None
+                        if bool(st.session_state.get("batch_apply_custom_background", False)):
+                            upload_revision = int(st.session_state.get("batch_custom_background_upload_revision", 0) or 0)
+                            upload_key = f"batch_custom_background_upload_{upload_revision}"
+                            uploaded_batch_background = st.file_uploader(
+                                "Escolher imagem de fundo",
+                                type=["png", "jpg", "jpeg", "webp"],
+                                key=upload_key,
+                                help="PNG, JPG ou WEBP. Limite de 20 MB.",
+                            )
+                            if uploaded_batch_background is not None:
+                                try:
+                                    batch_background_payload = _prepare_batch_custom_background_upload(uploaded_batch_background)
+                                    if batch_background_payload:
+                                        preview_image = Image.open(io.BytesIO(batch_background_payload[0])).convert("RGB")
+                                        st.image(preview_image, caption=batch_background_payload[2], width=190)
+                                except Exception as exc:
+                                    batch_background_error = str(exc)
+                                    st.error(f"Não foi possível usar esta imagem: {batch_background_error}")
+                            else:
+                                st.info("Selecione a imagem que será aplicada às artes marcadas.")
+
+                    with st.container(border=True):
+                        st.markdown("**REMOÇÃO DE FUNDO COM IA**")
                         st.caption(
-                            f"PNG {transparency_label}, sem guias · {cached_png['size'][0]} × {cached_png['size'][1]} px · "
-                            f"{cached_png['dpi']} DPI · corte de {spec.cut:g} mm"
+                            "Operação independente. Cada arte marcada será processada a partir do próprio arquivo original, "
+                            "inclusive a arte em foco quando estiver selecionada."
                         )
-                        st.download_button(
-                            "⬇️ Baixar PNG da arte selecionada",
-                            data=cached_png["bytes"],
-                            file_name=cached_png["name"],
-                            mime="image/png",
+                        remove_ai_clicked = st.button(
+                            "Remover Fundo com IA",
+                            key="batch_remove_background_ai_action",
                             type="primary",
                             use_container_width=True,
-                            key=f"download_focused_art_png_{int(selected_item['id'])}",
+                            disabled=(selected_count < 1),
+                            help="Executa a remoção U²-Net em todas as artes marcadas. A primeira execução pode demorar mais para baixar e carregar o modelo.",
+                        )
+                        if remove_ai_clicked:
+                            progress_bar = st.progress(0, text="Preparando remoção de fundo por IA…")
+                            with st.spinner("A IA está analisando e removendo o fundo das artes selecionadas…"):
+                                result = _on_pool_batch_remove_background_fallback(progress_bar=progress_bar)
+                            if result.get("errors"):
+                                st.warning("A remoção por IA terminou com erros em algumas artes. A seleção foi mantida para conferência e nova tentativa.")
+                            elif result.get("updated", 0):
+                                progress_bar.progress(100, text="Remoção de fundo por IA concluída · 100%")
+                                _finalize_successful_batch_operation(result, "Remoção de fundo por IA")
+                            st.rerun()
+
+                framing_mode = None
+                if bool(st.session_state.get("batch_apply_framing_cut", False)):
+                    framing_mode = "cut"
+                elif bool(st.session_state.get("batch_apply_framing_art", False)):
+                    framing_mode = "art"
+
+                fill_mode = None
+                if bool(st.session_state.get("batch_apply_blur", False)):
+                    fill_mode = "blur"
+                elif bool(st.session_state.get("batch_apply_solid_color", False)):
+                    fill_mode = "color"
+
+                custom_background_enabled = bool(st.session_state.get("batch_apply_custom_background", False))
+                has_any_setting = bool(framing_mode or fill_mode or (custom_background_enabled and batch_background_payload))
+                upload_missing = custom_background_enabled and batch_background_payload is None
+
+                apply_clicked = st.button(
+                    "Aplicar opções selecionadas",
+                    key="batch_apply_independent_settings",
+                    type="primary",
+                    use_container_width=True,
+                    disabled=(selected_count < 1 or not has_any_setting or upload_missing or bool(batch_background_error)),
+                    help="Aplica somente as opções marcadas a todas as artes selecionadas no Pool, incluindo a arte em foco se estiver marcada.",
+                )
+                if apply_clicked:
+                    settings = {
+                        "framing_mode": framing_mode,
+                        "fill_mode": fill_mode,
+                        "blur_strength": float(st.session_state.get("batch_blur_strength", BATCH_BLUR_DEFAULT)),
+                        "blur_base_color": str(st.session_state.get("batch_blur_base_color", BATCH_BACKGROUND_DEFAULT)),
+                        "solid_background_color": str(st.session_state.get("batch_solid_background_color", BATCH_BACKGROUND_DEFAULT)),
+                        "custom_background_payload": batch_background_payload if custom_background_enabled else None,
+                    }
+                    progress_bar = st.progress(0, text="Preparando aplicação dos ajustes em lote…")
+                    with st.spinner("Aplicando as opções às artes selecionadas…"):
+                        result = _on_pool_apply_selected_fallback(progress_bar=progress_bar, settings=settings)
+                    if result.get("errors"):
+                        st.warning("Algumas artes não puderam receber as configurações. A seleção foi mantida para conferência e nova tentativa.")
+                    elif result.get("updated", 0):
+                        progress_bar.progress(100, text="Ajustes em lote concluídos · 100%")
+                        _finalize_successful_batch_operation(result, "Ajustes em lote")
+                    st.rerun()
+
+
+            if batch_auto_expand:
+                # Com duas ou mais artes marcadas, mostrar o painel inteiro em
+                # vez de depender apenas do estado visual interno do expander.
+                with st.container(key="artwork_batch_expanded_panel", border=True):
+                    st.markdown(
+                        f'<div class="batch-panel-expanded-title">✦ AJUSTES EM LOTE '
+                        f'<span>{len(batch_target_ids)} ARTES SELECIONADAS</span></div>',
+                        unsafe_allow_html=True,
+                    )
+                    render_batch_controls()
+            else:
+                with st.expander("✦ AJUSTES EM LOTE", expanded=False):
+                    render_batch_controls()
+
+        # Compatibilidade com sessões Streamlit que ainda guardem rótulos antigos.
+        if st.session_state.get("artwork_editor_tool_section") in {"Fundo IA", "Fundo"}:
+            st.session_state["artwork_editor_tool_section"] = "Fundo & Borda"
+        if st.session_state.get("artwork_editor_tool_section") == "Lote":
+            st.session_state["artwork_editor_tool_section"] = "Enquadrar"
+        tool_section = st.session_state.get("artwork_editor_tool_section", "Enquadrar")
+        if tool_section not in {"Enquadrar", "Luz e cor", "Fundo & Borda"}:
+            tool_section = "Enquadrar"
+            st.session_state["artwork_editor_tool_section"] = tool_section
+        st.markdown(
+            """<style>
+            /* Navegação em segmentos nativos: dimensões previsíveis e rótulos inteiros. */
+            .st-key-artwork_editor_tool_nav,
+            .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] {
+                width:100% !important;
+                max-width:100% !important;
+            }
+            .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] [role="radiogroup"],
+            .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] [data-baseweb="button-group"] {
+                display:grid !important;
+                grid-template-columns:repeat(3,minmax(0,1fr)) !important;
+                align-items:stretch !important;
+                width:100% !important;
+                gap:5px !important;
+            }
+            .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] button {
+                min-width:0 !important;
+                width:100% !important;
+                min-height:44px !important;
+                height:auto !important;
+                padding:9px 7px !important;
+                white-space:nowrap !important;
+                overflow:visible !important;
+                text-overflow:clip !important;
+                justify-content:center !important;
+                font-size:clamp(11px, 1.05vw, 14px) !important;
+                line-height:1.2 !important;
+            }
+            .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] button > div,
+            .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] button span {
+                min-width:0 !important;
+                white-space:nowrap !important;
+                overflow:visible !important;
+                text-overflow:clip !important;
+                line-height:1.2 !important;
+            }
+            @media (max-width: 520px) {
+                .st-key-artwork_editor_tool_nav [data-testid="stSegmentedControl"] button {
+                    padding:8px 4px !important;
+                    font-size:12px !important;
+                }
+            }
+            </style>""",
+            unsafe_allow_html=True,
+        )
+        with st.container(key="artwork_editor_tool_nav"):
+            selected_tool_section = st.segmented_control(
+                "Área de edição",
+                options=("Enquadrar", "Luz e cor", "Fundo & Borda"),
+                selection_mode="single",
+                key="artwork_editor_tool_section",
+                default=tool_section,
+                width="stretch",
+                label_visibility="collapsed",
+                help="Escolha a categoria de ferramentas que deseja utilizar.",
+            )
+            tool_section = selected_tool_section or "Enquadrar"
+
+    with st.container(key="editor_workspace"):
+        tools_col, editor_col = st.columns([1.35, 1.85], gap="large")
+        with tools_col:
+            with st.container(key="card_left"):
+                if tool_section == "Enquadrar":
+                    st.markdown("**Enquadramento da arte**")
+                    if selected_item is not None:
+                        fit_mode = render_fit_mode_controls(prefix, int(selected_item["id"]))
+                    else:
+                        st.caption("Os controles de enquadramento serão habilitados quando uma arte for selecionada.")
+
+                elif tool_section == "Luz e cor":
+                    st.markdown("**Correção de luz, cor e detalhes**")
+                    if selected_item is not None:
+                        st.caption("A prévia permanece no mesmo enquadramento. Os ajustes também serão aplicados ao PNG e ao PDF.")
+                        with st.container(border=True):
+                            st.markdown("**Balanço de brancos**")
+                            st.slider(
+                                "Temperatura · frio ↔ quente", -100, 100, step=1,
+                                key=f"{prefix}_white_balance_temperature",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "white_balance_temperature"),
+                                help="Valores negativos deixam a imagem mais fria; positivos aquecem os tons.",
+                            )
+                            st.slider(
+                                "Matiz · verde ↔ magenta", -100, 100, step=1,
+                                key=f"{prefix}_white_balance_tint",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "white_balance_tint"),
+                                help="Compensa dominantes esverdeadas ou magentas.",
+                            )
+                        with st.container(border=True):
+                            st.markdown("**Iluminação**")
+                            st.slider(
+                                "Exposição", -2.0, 2.0, step=0.1, format="%.1f EV",
+                                key=f"{prefix}_exposure",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "exposure"),
+                                help="Ajuste global de luminosidade em pontos EV.",
+                            )
+                            st.slider(
+                                "Contraste", 0, 200, step=5, format="%d%%",
+                                key=f"{prefix}_contrast",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "contrast"),
+                            )
+                        with st.container(border=True):
+                            st.markdown("**Cor e textura**")
+                            st.slider(
+                                "Saturação", 0, 200, step=5, format="%d%%",
+                                key=f"{prefix}_saturation",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "saturation"),
+                            )
+                            st.slider(
+                                "Matiz de cor", -180, 180, step=1, format="%d°",
+                                key=f"{prefix}_hue",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "hue"),
+                            )
+                            st.slider(
+                                "Nitidez", 0, 200, step=5, format="%d%%",
+                                key=f"{prefix}_sharpness",
+                                on_change=make_artwork_settings_callback(int(selected_item["id"]), "sharpness"),
+                                help="Reduza para suavizar detalhes; aumente para realçar contornos.",
+                            )
+                        st.button(
+                            "Restaurar luz, cor e textura",
+                            key=f"reset_image_adjustments_{int(selected_item['id'])}",
+                            use_container_width=True,
+                            on_click=reset_artwork_image_adjustments,
+                            args=(int(selected_item["id"]),),
+                            help="Volta os ajustes de imagem aos valores originais, sem alterar o enquadramento.",
                         )
                     else:
-                        st.caption("Prepare o PNG somente quando a arte estiver pronta. A prévia continua leve durante a edição.")
+                        st.caption("Selecione uma arte no Pool para ajustar balanço de brancos, iluminação, cor e nitidez.")
 
-    with legend_col:
-        with st.container(key="card_guide_legend_side"):
-            brand.section_title(None, "LEGENDA", brand.YELLOW)
-            render_guide_legend()
+                elif tool_section == "Fundo & Borda":
+                    if selected_item is not None:
+                        item_id = int(selected_item["id"])
+                        current_edit = selected_item.get("edit", {})
+                        st.markdown("**Preenchimento das áreas vazias**")
+                        cut_preset_active = bool(
+                            current_edit.get("fit_cut_checked", False)
+                            and not current_edit.get("manual_transform_active", False)
+                            and str(current_edit.get("fit_basis_mode", "cut")) == "cut"
+                        )
+
+                        if cut_preset_active:
+                            st.info(
+                                "Os preenchimentos ficam indisponíveis somente enquanto o preset **Preencher até o corte** estiver ativo. "
+                                "Para habilitá-los, selecione **Encaixar na área da arte**, desmarque **Preencher até o corte** "
+                                "para usar o enquadramento livre ou arraste/redimensione a imagem para sair do preset."
+                            )
+                            background_label = "Sem preenchimento"
+                        else:
+                            st.caption("Escolha um único modo. Os controles específicos aparecem somente para a opção ativa.")
+                            current_background_mode = str(current_edit.get("background_mode", "Cor sólida"))
+                            if current_background_mode == "Sem preenchimento":
+                                current_background_mode = _restore_individual_fill_after_cut(current_edit, prefix)
+                            background_label = st.radio(
+                                "Modo de preenchimento",
+                                ["Cor sólida", "Imagem desfocada", "Fundo personalizado"],
+                                key=f"{prefix}_background_mode",
+                                on_change=make_artwork_background_mode_callback(item_id, prefix),
+                                horizontal=False,
+                                help=(
+                                    "Cor sólida usa uma cor uniforme. Imagem desfocada usa a cor de base e a intensidade do desfoque. "
+                                    "Fundo personalizado permite carregar uma imagem para criar a borda."
+                                ),
+                            )
+
+                        if background_label == "Cor sólida":
+                            with st.container(border=True):
+                                st.markdown("**Selecione a cor:**")
+                                color_field = "background"
+                                color_key = f"{prefix}_{color_field}"
+                                bg = str(st.session_state.get(color_key, current_edit.get(color_field, "#FFFFFF")))
+                                color_component_key = f"artwork_color_picker_{item_id}_solid"
+                                color_picker_component = get_artwork_integrated_color_picker_component()
+                                color_picker_component(
+                                    data={"color": bg},
+                                    on_color_change=make_artwork_color_picker_callback(
+                                        color_component_key, color_key, item_id, color_field
+                                    ),
+                                    key=color_component_key,
+                                )
+
+                        elif background_label == "Imagem desfocada":
+                            with st.container(border=True):
+                                st.slider(
+                                    "Intensidade do desfoque", 0.0, 18.0, step=0.1,
+                                    key=f"{prefix}_blur_strength",
+                                    on_change=make_artwork_settings_callback(item_id, "blur_strength"),
+                                    help="Aumente para suavizar mais o fundo. O valor inicial é 0,5 mm.",
+                                )
+                                color_field = "blur_base_color"
+                                color_key = f"{prefix}_{color_field}"
+                                bg = str(st.session_state.get(color_key, current_edit.get(color_field, "#FFFFFF")))
+                                st.markdown("**Cor de base**")
+                                color_component_key = f"artwork_color_picker_{item_id}_base"
+                                color_picker_component = get_artwork_integrated_color_picker_component()
+                                color_picker_component(
+                                    data={"color": bg},
+                                    on_color_change=make_artwork_color_picker_callback(
+                                        color_component_key, color_key, item_id, color_field
+                                    ),
+                                    key=color_component_key,
+                                )
+
+                        elif background_label == "Fundo personalizado":
+                            with st.container(border=True):
+                                st.caption("A imagem ocupa a região entre a guia Arte e a guia Corte; a arte principal permanece ajustável e limitada à guia Arte.")
+                                current_bg_bytes, current_bg_digest = _custom_background_payload(current_edit)
+                                current_bg_name = current_edit.get("background_image_name", "Fundo carregado")
+                                if current_bg_bytes and current_bg_digest:
+                                    status_cols = st.columns([1, 1.7])
+                                    with status_cols[0]:
+                                        st.image(current_bg_bytes, caption="Fundo aplicado", use_container_width=True)
+                                    with status_cols[1]:
+                                        st.success("Fundo personalizado ativo")
+                                        st.caption(str(current_bg_name))
+                                        st.button(
+                                            "Remover imagem de fundo",
+                                            key=f"remove_custom_background_{item_id}",
+                                            use_container_width=True,
+                                            help="Remove a camada decorativa e restaura o modo de preenchimento anterior.",
+                                            on_click=remove_artwork_custom_background,
+                                            args=(item_id,),
+                                        )
+                                    uploader_label = "Substituir imagem de fundo"
+                                else:
+                                    st.info("Selecione uma imagem para ativar o fundo personalizado.")
+                                    uploader_label = "Adicionar imagem de fundo"
+
+                                upload_revision = int(current_edit.get("background_upload_revision", 0) or 0)
+                                upload_key = f"{prefix}_custom_background_upload_{upload_revision}"
+                                st.file_uploader(
+                                    uploader_label,
+                                    type=["png", "jpg", "jpeg", "webp"],
+                                    key=upload_key,
+                                    on_change=set_artwork_custom_background,
+                                    args=(item_id, upload_key),
+                                    help="Use uma textura, padrão ou ilustração para criar uma borda personalizada. Limite de 20 MB.",
+                                )
+                                bg_error = current_edit.get("background_image_error")
+                                if bg_error:
+                                    st.error(f"Não foi possível carregar a imagem de fundo: {bg_error}")
+
+                        st.divider()
+                        st.markdown("**Recorte automático do assunto**")
+                        st.caption("A remoção por IA atua somente na arte principal. A imagem de borda e o preenchimento são mantidos; a IA não é executada em outras artes, a menos que seja marcada separadamente em Ajustes em Lote.")
+                        remove_bg_active = bool(current_edit.get("remove_background", False))
+                        processing_error = selected_item.get("image_processing_error")
+                        st.button(
+                            "Tentar remoção novamente" if remove_bg_active and processing_error else "Remover fundo com IA",
+                            key=f"remove_bg_{item_id}",
+                            type="primary",
+                            use_container_width=True,
+                            disabled=remove_bg_active and not bool(processing_error),
+                            on_click=set_artwork_background_removal,
+                            args=(item_id, True),
+                            help="Detecta o assunto principal e remove o fundo da imagem original.",
+                        )
+                        st.button(
+                            "Restaurar fundo original da arte",
+                            key=f"restore_bg_{item_id}",
+                            use_container_width=True,
+                            disabled=not remove_bg_active,
+                            on_click=set_artwork_background_removal,
+                            args=(item_id, False),
+                            help="Desativa a remoção por IA sem apagar a imagem de borda personalizada.",
+                        )
+                        if remove_bg_active:
+                            st.success("Remoção de fundo da arte principal ativa.")
+                        if processing_error:
+                            st.error(
+                                "Não foi possível processar esta imagem. Confira a instalação do removedor de fundos "
+                                "e a conexão necessária para baixar o modelo na primeira utilização. " + str(processing_error)
+                            )
+                    else:
+                        st.caption("Selecione uma arte no Pool para configurar o preenchimento, a borda personalizada e a remoção de fundo por IA.")
+
+        if selected_item is not None:
+            selected_digest = selected_item["image_digest"]
+            # Apenas metadados são lidos em trocas/ajustes; a imagem de produção em
+            # resolução total só é decodificada quando o usuário prepara o PNG/PDF.
+            selected_dimensions = get_image_dimensions(selected_digest, selected_item["image"])
+            # O estado é individual por item; nenhuma arte herda o zoom/posição da anterior.
+            zoom = float(st.session_state[f"{prefix}_zoom"])
+            off_x = float(st.session_state[f"{prefix}_offset_x"])
+            off_y = float(st.session_state[f"{prefix}_offset_y"])
+            blur_mm = float(st.session_state[f"{prefix}_blur_strength"])
+            persist_artwork_edit_state(selected_item, prefix)
+
+        with editor_col:
+            with st.container(key="card_preview"):
+                st.markdown(
+                    """<style>
+                    .st-key-preview_nav_previous button,
+                    .st-key-preview_nav_next button {
+                        min-height:46px !important;
+                        height:auto !important;
+                        border-radius:12px !important;
+                        padding:10px 8px !important;
+                        font-size:clamp(11px, .95vw, 14px) !important;
+                        font-weight:850 !important;
+                        letter-spacing:.025em !important;
+                        white-space:nowrap !important;
+                        border:1px solid rgba(255,255,255,.32) !important;
+                        box-shadow:0 4px 14px rgba(0,0,0,.20) !important;
+                        transition:filter .15s ease, transform .15s ease !important;
+                    }
+                    .st-key-preview_nav_previous button {
+                        background:linear-gradient(135deg,#159CCB,#0878A7) !important;
+                        color:#FFFFFF !important;
+                    }
+                    .st-key-preview_nav_next button {
+                        background:linear-gradient(135deg,#ED1B78,#B70F59) !important;
+                        color:#FFFFFF !important;
+                    }
+                    .st-key-preview_nav_previous button:hover:not(:disabled),
+                    .st-key-preview_nav_next button:hover:not(:disabled) {
+                        filter:brightness(1.13) saturate(1.08) !important;
+                        transform:translateY(-1px) !important;
+                    }
+                    .st-key-preview_nav_previous button:disabled,
+                    .st-key-preview_nav_next button:disabled {
+                        opacity:.42 !important;
+                        filter:grayscale(.45) !important;
+                    }
+                    @media(max-width:700px) {
+                        .st-key-preview_nav_previous button,
+                        .st-key-preview_nav_next button {
+                            font-size:10px !important;
+                            padding:8px 4px !important;
+                        }
+                    }
+                    </style>""",
+                    unsafe_allow_html=True,
+                )
+                preview_items = st.session_state.get("artwork_items", [])
+                preview_ids = [int(item.get("id", -1)) for item in preview_items]
+                try:
+                    preview_index = preview_ids.index(int(selected_item["id"])) if selected_item is not None else -1
+                except (ValueError, TypeError):
+                    preview_index = -1
+                previous_disabled = preview_index <= 0
+                next_disabled = preview_index < 0 or preview_index >= len(preview_items) - 1
+                preview_heading_cols = st.columns([5.0, 2.5, 2.5], gap="small", vertical_alignment="center")
+                with preview_heading_cols[0]:
+                    brand.section_title(None, "PRÉVIA DE AJUSTE", brand.MAGENTA)
+                    if preview_index >= 0:
+                        st.caption(f"Arte {preview_index + 1} de {len(preview_items)} · navegue pelo Pool")
+                with preview_heading_cols[1]:
+                    with st.container(key="preview_nav_previous"):
+                        st.button(
+                            "◀  ANTERIOR",
+                            key="editor_preview_previous_artwork",
+                            help="Editar a arte anterior na ordem do Pool",
+                            disabled=previous_disabled,
+                            use_container_width=True,
+                            on_click=_navigate_editor_artwork,
+                            args=(-1,),
+                        )
+                with preview_heading_cols[2]:
+                    with st.container(key="preview_nav_next"):
+                        st.button(
+                            "PRÓXIMA  ▶",
+                            key="editor_preview_next_artwork",
+                            help="Editar a próxima arte na ordem do Pool",
+                            disabled=next_disabled,
+                            use_container_width=True,
+                            on_click=_navigate_editor_artwork,
+                            args=(1,),
+                        )
+                if selected_item is not None and selected_dimensions is not None:
+                    token = image_editor_token(
+                        selected_item["image"], spec, int(selected_item["id"]), selected_digest
+                    )
+                    component_key = f"main_visual_image_editor_{int(selected_item['id'])}"
+                    token_state_key = f"_{prefix}_expected_token"
+                    st.session_state[token_state_key] = token
+                    editor_transform = current_editor_transform(component_key, token, prefix)
+                    editor = get_image_editor_component()
+                    editor_result = editor(
+                        data={
+                            "token": token,
+                            "image": editor_image_data_url(selected_digest, selected_item["image"]),
+                            # O backdrop é caro e desnecessário no modo de cor sólida.
+                            "backdrop_image": (
+                                editor_backdrop_data_url(selected_digest, selected_item["image"], bg)
+                                if background_mode == "blur" else ""
+                            ),
+                            "custom_background_image": (
+                                editor_image_data_url(custom_background_digest, custom_background_bytes)
+                                if has_custom_background else ""
+                            ),
+                            "custom_background_revision": int(saved_edit.get("custom_background_revision", 0) or 0),
+                            "shape": spec.shape,
+                            "size": spec.size,
+                            "cut": spec.cut,
+                            "fold": spec.fold,
+                            "art": spec.art,
+                            "safe": spec.safe,
+                            "guides": [g.key for g in GUIDES],
+                            "fit_mode": fit_mode,
+                            # Os dois presets restauram a escala-base exata do modo ativo.
+                            # A conversão entre bottons continua sendo calculada pela Segurança.
+                            "initial_zoom": 1.0,
+                            "background_mode": background_mode,
+                            "blur_mm": float(blur_mm),
+                            "bg": bg,
+                            "transform": editor_transform,
+                            "transform_revision": int(editor_transform.get("revision", 0)),
+                        },
+                        default={"transform": editor_transform},
+                        on_transform_change=make_image_editor_sync_callback(
+                            component_key, prefix, token_state_key,
+                            f"{prefix}_fit_cut_checked", f"{prefix}_fit_art_checked",
+                            int(selected_item["id"]),
+                        ),
+                        key=component_key,
+                    )
+                    apply_image_editor_state(editor_result, token, prefix)
+                    zoom = float(st.session_state[f"{prefix}_zoom"])
+                    off_x = float(st.session_state[f"{prefix}_offset_x"])
+                    off_y = float(st.session_state[f"{prefix}_offset_y"])
+                    persist_artwork_edit_state(selected_item, prefix)
+
+                    if fit_mode == "cut":
+                        box = image_box(selected_dimensions[0], selected_dimensions[1], spec.cut, zoom, off_x, off_y)
+                        dpi = min(selected_dimensions) / ((spec.cut * zoom) / 25.4)
+                    else:
+                        dpi = max(selected_dimensions) / ((spec.art * zoom) / 25.4)
+                    if dpi < 200:
+                        st.warning(f"Resolução efetiva ≈ {dpi:.0f} dpi — a impressão pode ficar pixelada (ideal: 300 dpi).")
+                    else:
+                        st.caption(f"Resolução efetiva da arte selecionada ≈ {dpi:.0f} dpi")
+                else:
+                    st.info("Selecione uma miniatura no pool para abrir a arte no editor com as guias.")
+
+                render_guide_legend()
+
+                # Exportação PNG sob demanda: não renderiza centenas de milhares de
+                # pixels durante cada arraste, clique ou atualização da prévia.
+                if selected_item is not None and selected_dimensions is not None:
+                    st.divider()
+                    brand.section_title(None, "EXPORTAR ARTE EM FOCO", brand.YELLOW)
+                    export_cols = st.columns([1, 2])
+                    with export_cols[0]:
+                        dpi_label = st.selectbox(
+                            "Resolução do PNG",
+                            ["300 dpi · alta qualidade", "600 dpi · máxima definição"],
+                            key="focused_art_png_dpi",
+                            filter_mode=None,
+                            accept_new_options=False,
+                        )
+                        dpi_export = 600 if dpi_label.startswith("600") else 300
+                    png_signature_data = (
+                        int(selected_item["id"]), selected_item["image_digest"],
+                        custom_background_digest,
+                        spec.shape, spec.size, spec.cut, spec.art, dpi_export,
+                        round(float(zoom), 6), round(float(off_x), 5), round(float(off_y), 5),
+                        bg, fit_mode, background_mode, round(float(blur_mm), 4),
+                    )
+                    png_signature = hashlib.sha256(repr(png_signature_data).encode("utf-8")).hexdigest()
+                    with export_cols[0]:
+                        prepare_png = st.button(
+                            "Preparar PNG",
+                            key=f"prepare_focused_art_png_{int(selected_item['id'])}",
+                            type="primary",
+                            use_container_width=True,
+                        )
+                    if prepare_png:
+                        with st.spinner("Preparando PNG da arte selecionada em resolução original…"):
+                            production_image = load_image(
+                                selected_item["image"], bg, image_digest=selected_digest
+                            )
+                            production_background = (
+                                load_image(
+                                    custom_background_bytes,
+                                    image_digest=custom_background_digest,
+                                )
+                                if has_custom_background else None
+                            )
+                            clean_png, png_size = build_button_art_png(
+                                spec, production_image, dpi=dpi_export, zoom=zoom,
+                                off_x=off_x, off_y=off_y, bg=bg, fit_mode=fit_mode,
+                                background_mode=background_mode, blur_mm=float(blur_mm),
+                                background_image=production_background,
+                            )
+                        shape_label = "quadrado" if spec.shape == "square" else "redondo"
+                        size_label = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
+                        st.session_state["focused_art_png_export"] = {
+                            "signature": png_signature,
+                            "bytes": clean_png,
+                            "size": png_size,
+                            "name": f"arte_botton_{shape_label}_{size_label}_{dpi_export}dpi.png",
+                            "dpi": dpi_export,
+                        }
+                    cached_png = st.session_state.get("focused_art_png_export")
+                    with export_cols[1]:
+                        if cached_png and cached_png.get("signature") == png_signature:
+                            transparency_label = "círculo com transparência externa" if spec.shape == "circle" else "quadrado opaco"
+                            st.caption(
+                                f"PNG {transparency_label}, sem guias · {cached_png['size'][0]} × {cached_png['size'][1]} px · "
+                                f"{cached_png['dpi']} DPI · corte de {spec.cut:g} mm"
+                            )
+                            st.download_button(
+                                "⬇️ Baixar PNG da arte selecionada",
+                                data=cached_png["bytes"],
+                                file_name=cached_png["name"],
+                                mime="image/png",
+                                type="primary",
+                                use_container_width=True,
+                                key=f"download_focused_art_png_{int(selected_item['id'])}",
+                            )
+                        else:
+                            st.caption("Prepare o PNG somente quando a arte estiver pronta. A prévia continua leve durante a edição.")
 
     # ---------------- Folha de impressão e exportação ----------------
     with st.container(key="card_right"):
         brand.section_title(None, "FOLHA DE IMPRESSÃO", brand.MAGENTA)
-        sheet_settings_col, sheet_canvas_col = st.columns([1.02, 3.18], gap="large")
-
-        # Controles físicos da folha ficam ao lado da prévia, dentro da mesma
-        # sessão visual. O gabarito SVG A4 foi movido para a barra lateral.
-        with sheet_settings_col:
-            with st.container(border=True, key="sheet_settings_panel"):
-                st.markdown('<div class="sheet-config-title">CONFIGURAÇÃO DA FOLHA</div>', unsafe_allow_html=True)
-                st.caption("Ajuste a folha e acompanhe a prévia ao lado.")
-                paper = st.selectbox("Papel", [*PAPERS, "Personalizado"], key="paper_size")
-                if paper == "Personalizado":
-                    custom_cols = st.columns(2)
-                    custom_cols[0].number_input(
-                        "Largura (mm)", 60.0, 1500.0, step=1.0, key="custom_page_w"
-                    )
-                    custom_cols[1].number_input(
-                        "Altura (mm)", 60.0, 1500.0, step=1.0, key="custom_page_h"
-                    )
-                st.radio(
-                    "Orientação", ["Retrato", "Paisagem"], horizontal=True,
-                    key="page_orientation",
-                )
+        with st.container(border=True, key="sheet_settings_panel"):
+            st.markdown('<div class="sheet-config-title">CONFIGURAÇÃO DA FOLHA</div>', unsafe_allow_html=True)
+            st.caption("Margem e distância entre bottons continuam configuráveis e são lembradas separadamente para cada combinação de papel e tamanho.")
+            settings_cols = st.columns([1.15, 1.0, 1.0, 1.0])
+            with settings_cols[0]:
+                paper = st.selectbox("Papel", [*PAPERS, "Personalizado"], key="paper_size", filter_mode=None, accept_new_options=False)
+            with settings_cols[1]:
+                st.selectbox("Orientação", ["Retrato", "Paisagem"], key="page_orientation", filter_mode=None, accept_new_options=False)
+            with settings_cols[2]:
                 st.number_input(
-                    "Margem da folha (mm)", 0.0, 50.0, step=0.5, key="margin_mm",
-                    help="Valor inicial calculado para o papel e tamanho escolhido. Você pode alterar livremente.",
+                    "Margem da folha (mm)", 0.0, 50.0, step=0.5, format="%.1f", key="margin_mm",
+                    help="Margem externa entre os bottons e a borda da folha. O valor é salvo por papel e tamanho.",
                 )
+            with settings_cols[3]:
                 st.number_input(
-                    "Espaço entre bottons (mm)", 0.0, 20.0, step=0.5, key="gap_mm",
-                    help="Distância mínima entre os limites externos de corte dos bottons.",
+                    "Espaço entre bottons (mm)", 0.0, 20.0, step=0.5, format="%.1f", key="gap_mm",
+                    help="Distância mínima entre os limites externos de corte dos bottons. O valor é salvo por papel e tamanho.",
                 )
-                st.caption(
-                    f"Sugestão automática: margem {recommended_margin:g} mm · "
-                    f"distância {recommended_gap:g} mm."
+            if paper == "Personalizado":
+                custom_cols = st.columns(2)
+                custom_cols[0].number_input(
+                    "Largura da folha (mm)", 60.0, 1500.0, step=1.0, key="custom_page_w"
                 )
+                custom_cols[1].number_input(
+                    "Altura da folha (mm)", 60.0, 1500.0, step=1.0, key="custom_page_h"
+                )
+            action_cols = st.columns([1.2, 2.8])
+            with action_cols[0]:
                 st.button(
                     "Restaurar valores recomendados",
+                    key="restore_recommended_layout_button",
                     use_container_width=True,
                     on_click=restore_recommended_layout,
                 )
-                with st.expander("Guias impressas", expanded=False):
-                    for guide in GUIDES:
-                        st.checkbox(
-                            f"{guide.label} ({getattr(spec, guide.attr):g} mm)",
-                            key=f"guide_single_{guide.key}",
-                        )
-
-        with sheet_canvas_col:
-            with st.container(border=True, key="sheet_canvas_panel"):
-                brand.section_title(None, "PRÉVIA DA FOLHA", brand.MAGENTA)
-                positions = compute_layout(page_w, page_h, spec.cut, margin, gap, mode)
-                per_page = len(positions)
-                if per_page == 0:
-                    st.error("Os bottons não cabem na folha com essas margens.")
-                else:
-                    grid_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "grid"))
-                    hex_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "hex")) if spec.shape == "circle" else 0
-
-                    # A capacidade substitui o seletor antigo de disposição:
-                    # os próprios rótulos passam a ser as opções funcionais.
-                    grid_choice = f"Grade: {grid_n} por folha"
-                    hex_choice = f"Hexagonal: {hex_n} por folha"
-                    current_layout_label = str(st.session_state.get("layout_label", "Grade"))
-                    selected_capacity_choice = (
-                        hex_choice if current_layout_label.startswith("Hexagonal") else grid_choice
+            with action_cols[1]:
+                st.caption(
+                    f"Sugestão automática para este perfil: margem {recommended_margin:g} mm · "
+                    f"distância {recommended_gap:g} mm. As alterações manuais são preservadas ao trocar de tamanho."
+                )
+            with st.expander("Guias impressas", expanded=False):
+                for guide in GUIDES:
+                    render_touch_checkbox(
+                        f"{guide.label} ({getattr(spec, guide.attr):g} mm)",
+                        key=f"guide_single_{guide.key}",
                     )
-                    capacity_options = [grid_choice, hex_choice] if spec.shape == "circle" else [grid_choice]
-                    if st.session_state.get("layout_capacity_choice") != selected_capacity_choice:
-                        st.session_state["layout_capacity_choice"] = selected_capacity_choice
-                    if spec.shape == "circle":
-                        st.radio(
-                            "Capacidade por disposição",
-                            capacity_options,
-                            horizontal=True,
-                            key="layout_capacity_choice",
-                            on_change=_sync_layout_from_capacity_choice,
-                            label_visibility="collapsed",
-                        )
+
+        with st.container(border=True, key="sheet_canvas_panel"):
+            brand.section_title(None, "PRÉVIA DA FOLHA", brand.MAGENTA)
+            positions = compute_layout(page_w, page_h, spec.cut, margin, gap, mode)
+            per_page = len(positions)
+            if per_page == 0:
+                st.error("Os bottons não cabem na folha com essas margens.")
+            else:
+                grid_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "grid"))
+                hex_n = len(compute_layout(page_w, page_h, spec.cut, margin, gap, "hex")) if spec.shape == "circle" else 0
+
+                # A capacidade substitui o seletor antigo de disposição:
+                # os próprios rótulos passam a ser as opções funcionais.
+                grid_choice = f"Grade: {grid_n} por folha"
+                hex_choice = f"Hexagonal: {hex_n} por folha"
+                current_layout_label = str(st.session_state.get("layout_label", "Grade"))
+                selected_capacity_choice = (
+                    hex_choice if current_layout_label.startswith("Hexagonal") else grid_choice
+                )
+                capacity_options = [grid_choice, hex_choice] if spec.shape == "circle" else [grid_choice]
+                if st.session_state.get("layout_capacity_choice") != selected_capacity_choice:
+                    st.session_state["layout_capacity_choice"] = selected_capacity_choice
+                if spec.shape == "circle":
+                    st.radio(
+                        "Capacidade por disposição",
+                        capacity_options,
+                        horizontal=True,
+                        key="layout_capacity_choice",
+                        on_change=_sync_layout_from_capacity_choice,
+                        label_visibility="collapsed",
+                    )
+                else:
+                    st.caption(grid_choice)
+
+                metrics = st.columns(3)
+                metrics[0].metric("Bottons por folha", per_page)
+                metrics[1].metric("Folha", f"{page_w:g} × {page_h:g} mm")
+                metrics[2].metric("Artes diferentes", len(st.session_state["artwork_items"]))
+
+                runtime_groups = []
+                for entry in st.session_state["artwork_items"]:
+                    ensure_artwork_edit_state(entry, spec, sync_session=False)
+                    edit = entry.get("edit", {})
+                    item_background_label = str(edit.get("background_mode", "Cor sólida"))
+                    item_background_mode = "blur" if item_background_label == "Imagem desfocada" else "color"
+                    if item_background_label == "Sem preenchimento":
+                        item_bg = "#FFFFFF"
                     else:
-                        st.caption(grid_choice)
+                        item_bg_field = "blur_base_color" if item_background_mode == "blur" else "background"
+                        item_bg = str(edit.get(item_bg_field, edit.get("background", "#FFFFFF")))
+                    item_background_bytes, item_background_digest = _custom_background_payload(edit)
+                    runtime_groups.append({
+                        "id": entry["id"],
+                        "qty": int(entry.get("qty", 1)),
+                        "spec": spec,
+                        "image_digest": entry["image_digest"],
+                        "image_bytes": entry["image"],
+                        "zoom": float(edit.get("zoom", 1.0)),
+                        "off_x": float(edit.get("offset_x", 0.0)),
+                        "off_y": float(edit.get("offset_y", 0.0)),
+                        "fit_mode": str(edit.get("fit_basis_mode", "cut")),
+                        "background_mode": item_background_mode,
+                        "blur_mm": float(edit.get("blur_strength", 0.5)),
+                        "bg": item_bg,
+                        "background_image_digest": item_background_digest,
+                        "background_image_bytes": item_background_bytes,
+                    })
 
-                    metrics = st.columns(3)
-                    metrics[0].metric("Bottons por folha", per_page)
-                    metrics[1].metric("Folha", f"{page_w:g} × {page_h:g} mm")
-                    metrics[2].metric("Artes diferentes", len(st.session_state["artwork_items"]))
+                total_qty = sum(entry["qty"] for entry in runtime_groups)
+                if runtime_groups:
+                    n_pages = math.ceil(total_qty / per_page)
+                    page_key = "_sheet_preview_page_selector"
+                    current_page = int(st.session_state.get(page_key, 1) or 1)
+                    current_page = max(1, min(n_pages, current_page))
+                    st.session_state[page_key] = current_page
 
-                    runtime_groups = []
-                    for entry in st.session_state["artwork_items"]:
-                        ensure_artwork_edit_state(entry, spec, sync_session=False)
-                        edit = entry.get("edit", {})
-                        item_bg = str(edit.get("background", "#FFFFFF"))
-                        item_background_label = str(edit.get("background_mode", "Cor sólida"))
-                        item_background_mode = "blur" if item_background_label == "Imagem desfocada" else "color"
-                        runtime_groups.append({
-                            "id": entry["id"],
-                            "qty": int(entry.get("qty", 1)),
-                            "spec": spec,
-                            "image_digest": entry["image_digest"],
-                            "image_bytes": entry["image"],
-                            "zoom": float(edit.get("zoom", 1.0)),
-                            "off_x": float(edit.get("offset_x", 0.0)),
-                            "off_y": float(edit.get("offset_y", 0.0)),
-                            "fit_mode": str(edit.get("fit_basis_mode", "cut")),
-                            "background_mode": item_background_mode,
-                            "blur_mm": float(edit.get("blur_strength", 0.5)),
-                            "bg": item_bg,
-                        })
-
-                    total_qty = sum(entry["qty"] for entry in runtime_groups)
-                    if runtime_groups:
-                        n_pages = math.ceil(total_qty / per_page)
-                        page_key = "_sheet_preview_page_selector"
-                        current_page = int(st.session_state.get(page_key, 1) or 1)
-                        current_page = max(1, min(n_pages, current_page))
-                        st.session_state[page_key] = current_page
-
-                        if n_pages > 1:
-                            page_nav = st.columns([1.1, 1.6, 1.1], gap="small")
-                            with page_nav[0]:
-                                st.button(
-                                    "← Página anterior",
-                                    key="sheet_preview_page_previous",
-                                    use_container_width=True,
-                                    disabled=current_page <= 1,
-                                    on_click=_step_sheet_preview_page,
-                                    args=(-1, n_pages),
-                                )
-                            with page_nav[1]:
-                                st.selectbox(
-                                    "Página da prévia",
-                                    options=list(range(1, n_pages + 1)),
-                                    format_func=lambda value: f"Página {value} de {n_pages}",
-                                    key=page_key,
-                                    label_visibility="collapsed",
-                                )
-                            with page_nav[2]:
-                                st.button(
-                                    "Próxima página →",
-                                    key="sheet_preview_page_next",
-                                    use_container_width=True,
-                                    disabled=current_page >= n_pages,
-                                    on_click=_step_sheet_preview_page,
-                                    args=(1, n_pages),
-                                )
-                        else:
-                            st.caption("Página 1 de 1")
-
-                        current_page = int(st.session_state.get(page_key, 1) or 1)
-                        current_page_items = _get_items_for_sheet_page(runtime_groups, current_page, per_page)
-                        preview_placements_tuple = tuple(
-                            (index, position[0], position[1])
-                            for index, position in enumerate(positions[:len(current_page_items)])
-                        )
-                        preview_payload = tuple(
-                            (
-                                entry["image_digest"], entry["image_bytes"],
-                                entry["zoom"], entry["off_x"], entry["off_y"],
-                                entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
+                    if n_pages > 1:
+                        page_nav = st.columns([1.1, 1.6, 1.1], gap="small")
+                        with page_nav[0]:
+                            st.button(
+                                "← Página anterior",
+                                key="sheet_preview_page_previous",
+                                use_container_width=True,
+                                disabled=current_page <= 1,
+                                on_click=_step_sheet_preview_page,
+                                args=(-1, n_pages),
                             )
-                            for entry in current_page_items
+                        with page_nav[1]:
+                            st.selectbox(
+                                "Página da prévia",
+                                options=list(range(1, n_pages + 1)),
+                                format_func=lambda value: f"Página {value} de {n_pages}",
+                                key=page_key,
+                                label_visibility="collapsed",
+                                filter_mode=None,
+                                accept_new_options=False,
+                            )
+                        with page_nav[2]:
+                            st.button(
+                                "Próxima página →",
+                                key="sheet_preview_page_next",
+                                use_container_width=True,
+                                disabled=current_page >= n_pages,
+                                on_click=_step_sheet_preview_page,
+                                args=(1, n_pages),
+                            )
+                    else:
+                        st.caption("Página 1 de 1")
+
+                    current_page = int(st.session_state.get(page_key, 1) or 1)
+                    current_page_items = _get_items_for_sheet_page(runtime_groups, current_page, per_page)
+                    preview_placements_tuple = tuple(
+                        (index, position[0], position[1])
+                        for index, position in enumerate(positions[:len(current_page_items)])
+                    )
+                    preview_payload = tuple(
+                        (
+                            entry["image_digest"], entry["image_bytes"],
+                            entry["zoom"], entry["off_x"], entry["off_y"],
+                            entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
+                            entry["background_image_digest"], entry["background_image_bytes"],
                         )
-                        sheet_preview_image = render_mixed_sheet_preview_cached(
+                        for entry in current_page_items
+                    )
+                    sheet_preview_image = render_mixed_sheet_preview_cached(
+                        preview_payload, preview_placements_tuple, spec,
+                        page_w, page_h, bg, tuple(guides),
+                    )
+                    st.image(
+                        sheet_preview_image,
+                        caption=(
+                            f"Página {current_page} de {n_pages} · artes repetidas conforme as quantidades "
+                            "e a ordem das miniaturas do Pool"
+                        ),
+                        width=SHEET_PREVIEW_WIDTH_PX,
+                    )
+
+                    item_signature = tuple(
+                        (
+                            entry["id"], entry["image_digest"], entry["background_image_digest"], entry["qty"],
+                            entry["zoom"], entry["off_x"], entry["off_y"],
+                            entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
+                        )
+                        for entry in runtime_groups
+                    )
+                    sig = (
+                        "art_batch", item_signature, size_key, page_w, page_h,
+                        margin, gap, mode, guides,
+                    )
+
+                    # A visualização em tamanho real acompanha a página selecionada.
+                    real_size_signature = hashlib.sha256(
+                        repr((sig, "real-size-viewer-v2", page_w, page_h, current_page)).encode("utf-8")
+                    ).hexdigest()
+                    real_size_cache = st.session_state.get("_sheet_real_size_preview_cache")
+                    if not real_size_cache or real_size_cache.get("signature") != real_size_signature:
+                        # Renderizar a origem em 150 dpi e exibi-la em 96 CSS px/pol.
+                        # A resolução extra reduz a quantização das bordas circulares,
+                        # sem alterar a dimensão física mostrada no monitor.
+                        real_size_ppm = min(150.0 / 25.4, 5000.0 / max(float(page_w), float(page_h), 1.0))
+                        real_size_image = render_mixed_sheet_preview_cached(
                             preview_payload, preview_placements_tuple, spec,
                             page_w, page_h, bg, tuple(guides),
+                            preview_ppm=real_size_ppm,
                         )
-                        st.image(
-                            sheet_preview_image,
-                            caption=(
-                                f"Página {current_page} de {n_pages} · artes repetidas conforme as quantidades "
-                                "e a ordem das miniaturas do Pool"
-                            ),
-                            width=SHEET_PREVIEW_WIDTH_PX,
+                        real_size_buffer = io.BytesIO()
+                        real_size_image.save(real_size_buffer, format="WEBP", quality=92, method=1)
+                        real_size_data_url = (
+                            "data:image/webp;base64,"
+                            + base64.b64encode(real_size_buffer.getvalue()).decode("ascii")
                         )
+                        st.session_state["_sheet_real_size_preview_cache"] = {
+                            "signature": real_size_signature,
+                            "image_data_url": real_size_data_url,
+                        }
+                        real_size_cache = st.session_state["_sheet_real_size_preview_cache"]
 
-                        item_signature = tuple(
-                            (
-                                entry["id"], entry["image_digest"], entry["qty"],
-                                entry["zoom"], entry["off_x"], entry["off_y"],
-                                entry["fit_mode"], entry["background_mode"], entry["blur_mm"], entry["bg"],
-                            )
-                            for entry in runtime_groups
-                        )
-                        sig = (
-                            "art_batch", item_signature, size_key, page_w, page_h,
-                            margin, gap, mode, guides,
-                        )
+                    real_size_viewer = get_sheet_real_size_viewer_component()
+                    real_size_viewer(
+                        data={
+                            "signature": real_size_cache["signature"],
+                            "image_data_url": real_size_cache["image_data_url"],
+                            "page_w_mm": float(page_w),
+                            "page_h_mm": float(page_h),
+                            "page_label": f"{paper} · página {current_page}/{n_pages}",
+                            "button_size_mm": float(spec.size),
+                            "cut_mm": float(spec.cut),
+                        },
+                        key="sheet_real_size_viewer",
+                        width="stretch",
+                    )
+                    st.caption(
+                        "A visualização em tamanho real usa a referência de 96 px/pol. "
+                        "Na tela cheia, calibre a régua de 100 mm com uma régua física. Use os botões + e − para correções finas. "
+                        "A calibração fica salva neste navegador e pode ser refeita ao trocar de monitor ou zoom."
+                    )
 
-                        # A visualização em tamanho real acompanha a página selecionada.
-                        real_size_signature = hashlib.sha256(
-                            repr((sig, "real-size-viewer-v2", page_w, page_h, current_page)).encode("utf-8")
-                        ).hexdigest()
-                        real_size_cache = st.session_state.get("_sheet_real_size_preview_cache")
-                        if not real_size_cache or real_size_cache.get("signature") != real_size_signature:
-                            # Renderizar a origem em 150 dpi e exibi-la em 96 CSS px/pol.
-                            # A resolução extra reduz a quantização das bordas circulares,
-                            # sem alterar a dimensão física mostrada no monitor.
-                            real_size_ppm = min(150.0 / 25.4, 5000.0 / max(float(page_w), float(page_h), 1.0))
-                            real_size_image = render_mixed_sheet_preview_cached(
-                                preview_payload, preview_placements_tuple, spec,
-                                page_w, page_h, bg, tuple(guides),
-                                preview_ppm=real_size_ppm,
-                            )
-                            real_size_buffer = io.BytesIO()
-                            real_size_image.save(real_size_buffer, format="WEBP", quality=92, method=1)
-                            real_size_data_url = (
-                                "data:image/webp;base64,"
-                                + base64.b64encode(real_size_buffer.getvalue()).decode("ascii")
-                            )
-                            st.session_state["_sheet_real_size_preview_cache"] = {
-                                "signature": real_size_signature,
-                                "image_data_url": real_size_data_url,
-                            }
-                            real_size_cache = st.session_state["_sheet_real_size_preview_cache"]
+                    shape_name = "quadrado" if spec.shape == "square" else "redondo"
+                    size_name = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
+                    fname = f"bottons_{shape_name}_{size_name}_{total_qty}un.pdf"
 
-                        real_size_viewer = get_sheet_real_size_viewer_component()
-                        real_size_viewer(
+                    if st.button("Gerar PDF", type="primary", disabled=(total_qty <= 0), key="generate_art_batch_pdf"):
+                        with st.spinner("Gerando PDF com todas as artes do lote…"):
+                            pdf_items = []
+                            for entry in runtime_groups:
+                                pdf_entry = dict(entry)
+                                pdf_entry["img"] = load_image(
+                                    entry["image_bytes"], image_digest=entry["image_digest"]
+                                )
+                                pdf_entry["background_image"] = (
+                                    load_image(
+                                        entry["background_image_bytes"],
+                                        image_digest=entry["background_image_digest"],
+                                    )
+                                    if entry["background_image_bytes"] and entry["background_image_digest"] else None
+                                )
+                                pdf_items.append(pdf_entry)
+                            pdf = build_art_batch_pdf(
+                                pdf_items, positions, page_w, page_h, total_qty,
+                                bg=bg, guides=guides,
+                            )
+                        pdf_base64 = base64.b64encode(pdf).decode("ascii")
+                        st.session_state["pdf"] = {
+                            "sig": sig, "bytes": pdf, "base64": pdf_base64, "name": fname
+                        }
+
+                    stored = st.session_state.get("pdf")
+                    if stored and stored["sig"] == sig:
+                        st.download_button(
+                            f"⬇️ Baixar PDF ({len(stored['bytes']) / 1e6:.1f} MB)",
+                            stored["bytes"], file_name=stored["name"], mime="application/pdf", type="primary",
+                            key="download_art_batch_pdf",
+                        )
+                        pdf_print = get_pdf_print_component()
+                        pdf_print(
                             data={
-                                "signature": real_size_cache["signature"],
-                                "image_data_url": real_size_cache["image_data_url"],
-                                "page_w_mm": float(page_w),
-                                "page_h_mm": float(page_h),
-                                "page_label": f"{paper} · página {current_page}/{n_pages}",
-                                "button_size_mm": float(spec.size),
-                                "cut_mm": float(spec.cut),
+                                "pdf_base64": stored.get("base64") or base64.b64encode(stored["bytes"]).decode("ascii"),
+                                "signature": hashlib.sha256(repr(stored["sig"]).encode("utf-8")).hexdigest(),
                             },
-                            key="sheet_real_size_viewer",
+                            key="pdf_print_direct",
                             width="stretch",
                         )
-                        st.caption(
-                            "A visualização em tamanho real usa a referência de 96 px/pol. "
-                            "Na tela cheia, calibre a régua de 100 mm com uma régua física. Use os botões + e − para correções finas. "
-                            "A calibração fica salva neste navegador e pode ser refeita ao trocar de monitor ou zoom."
-                        )
-
-                        shape_name = "quadrado" if spec.shape == "square" else "redondo"
-                        size_name = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
-                        fname = f"bottons_{shape_name}_{size_name}_{total_qty}un.pdf"
-
-                        if st.button("Gerar PDF", type="primary", disabled=(total_qty <= 0), key="generate_art_batch_pdf"):
-                            with st.spinner("Gerando PDF com todas as artes do lote…"):
-                                pdf_items = []
-                                for entry in runtime_groups:
-                                    pdf_entry = dict(entry)
-                                    pdf_entry["img"] = load_image(
-                                        entry["image_bytes"], image_digest=entry["image_digest"]
-                                    )
-                                    pdf_items.append(pdf_entry)
-                                pdf = build_art_batch_pdf(
-                                    pdf_items, positions, page_w, page_h, total_qty,
-                                    bg=bg, guides=guides,
-                                )
-                            pdf_base64 = base64.b64encode(pdf).decode("ascii")
-                            st.session_state["pdf"] = {
-                                "sig": sig, "bytes": pdf, "base64": pdf_base64, "name": fname
-                            }
-
-                        stored = st.session_state.get("pdf")
-                        if stored and stored["sig"] == sig:
-                            st.download_button(
-                                f"⬇️ Baixar PDF ({len(stored['bytes']) / 1e6:.1f} MB)",
-                                stored["bytes"], file_name=stored["name"], mime="application/pdf", type="primary",
-                                key="download_art_batch_pdf",
+                        with st.container(border=True):
+                            st.markdown("**Impressão em escala real**")
+                            st.caption(
+                                "O botão Imprimir PDF solicita diretamente o diálogo de impressão do navegador, sem abrir prévia ou nova aba. "
+                                "Para manter a escala física 1:1, escolha Tamanho real/100% e desative Ajustar à página."
                             )
-                            pdf_print = get_pdf_print_component()
-                            pdf_print(
-                                data={
-                                    "pdf_base64": stored.get("base64") or base64.b64encode(stored["bytes"]).decode("ascii"),
-                                    "signature": hashlib.sha256(repr(stored["sig"]).encode("utf-8")).hexdigest(),
-                                },
-                                key="pdf_print_direct",
-                                width="stretch",
-                            )
-                            with st.container(border=True):
-                                st.markdown("**Impressão em escala real**")
-                                st.caption(
-                                    "O botão Imprimir PDF solicita diretamente o diálogo de impressão do navegador, sem abrir prévia ou nova aba. "
-                                    "Para manter a escala física 1:1, escolha Tamanho real/100% e desative Ajustar à página."
-                                )
-                        elif stored:
-                            st.info("As artes, quantidades ou configurações mudaram desde o último PDF — gere o arquivo novamente.")
-                    else:
-                        st.info("Adicione as artes para montar a folha de impressão.")
+                    elif stored:
+                        st.info("As artes, quantidades ou configurações mudaram desde o último PDF — gere o arquivo novamente.")
+                else:
+                    st.info("Adicione as artes para montar a folha de impressão.")
 
     brand.render_footer()
 

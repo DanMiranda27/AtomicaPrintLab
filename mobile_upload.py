@@ -52,6 +52,7 @@ def create_upload_session() -> str:
             "total_bytes": 0,  # bytes ainda na fila, aguardando o Pool
             "received_files": 0,
             "received_bytes": 0,
+            "upload_ids": set(),
         }
     return token
 
@@ -120,6 +121,15 @@ def get_mobile_upload_port() -> int:
 
         def do_GET(self):
             path = urlparse(self.path).path.rstrip("/")
+            ping_prefix = "/api/ping/"
+            if path.startswith(ping_prefix):
+                token = path[len(ping_prefix):]
+                if not renew_upload_session(token):
+                    self._send(410, b'{"ok":false,"error":"Sessao expirada."}', "application/json; charset=utf-8")
+                    return
+                self._send(200, b'{"ok":true}', "application/json; charset=utf-8")
+                return
+
             prefix = "/upload/"
             if not path.startswith(prefix):
                 self._send(404, b"Pagina nao encontrada.")
@@ -151,6 +161,9 @@ def get_mobile_upload_port() -> int:
                 return
 
             raw_name = self.headers.get("X-Filename", "imagem.jpg")
+            upload_id = str(self.headers.get("X-Upload-Id", "")).strip()[:100]
+            if not upload_id:
+                upload_id = secrets.token_urlsafe(18)
             filename = unquote(raw_name).replace("\\", "/").split("/")[-1].strip()
             if not filename or len(filename) > 180:
                 filename = "imagem.jpg"
@@ -170,19 +183,27 @@ def get_mobile_upload_port() -> int:
                 if not session:
                     self._send(410, b'{"ok":false,"error":"QR Code expirado."}', "application/json; charset=utf-8")
                     return
-                if session["received_files"] >= MAX_SESSION_FILES:
-                    self._send(429, b'{"ok":false,"error":"Limite de 50 imagens por sessao."}', "application/json; charset=utf-8")
-                    return
-                if session["received_bytes"] + len(data) > MAX_SESSION_BYTES:
-                    self._send(429, b'{"ok":false,"error":"Limite total de 250 MB por sessao atingido."}', "application/json; charset=utf-8")
-                    return
-                session["files"].append((filename, data))
-                session["total_bytes"] += len(data)
-                session["received_files"] += 1
-                session["received_bytes"] += len(data)
+                if upload_id in session.setdefault("upload_ids", set()):
+                    # Um retry pode chegar depois de o servidor já ter recebido
+                    # o arquivo, mas antes de o navegador receber a resposta.
+                    # A chave idempotente evita duplicar a arte no Pool.
+                    duplicate = True
+                else:
+                    duplicate = False
+                    if session["received_files"] >= MAX_SESSION_FILES:
+                        self._send(429, b'{"ok":false,"error":"Limite de 50 imagens por sessao."}', "application/json; charset=utf-8")
+                        return
+                    if session["received_bytes"] + len(data) > MAX_SESSION_BYTES:
+                        self._send(429, b'{"ok":false,"error":"Limite total de 250 MB por sessao atingido."}', "application/json; charset=utf-8")
+                        return
+                    session["files"].append((filename, data))
+                    session["upload_ids"].add(upload_id)
+                    session["total_bytes"] += len(data)
+                    session["received_files"] += 1
+                    session["received_bytes"] += len(data)
                 session["expires_at"] = time.time() + SESSION_TTL_SECONDS
 
-            response = json.dumps({"ok": True, "name": filename, "bytes": len(data)}, ensure_ascii=False).encode("utf-8")
+            response = json.dumps({"ok": True, "duplicate": duplicate, "name": filename, "bytes": len(data)}, ensure_ascii=False).encode("utf-8")
             self._send(200, response, "application/json; charset=utf-8")
 
     last_error: OSError | None = None
@@ -253,8 +274,102 @@ input{position:absolute;width:1px;height:1px;opacity:0}.send{width:100%;min-heig
 <p class="fine">Use somente uma rede Wi‑Fi confiável. Este código é temporário e expira após 30 minutos de inatividade. Limite: 50 imagens e 250 MB por sessão, até 100 MB por arquivo. Formatos aceitos: PNG, JPG e WEBP.</p></section></main>
 <script>
 const token = __TOKEN__;
-const input = document.getElementById('photos'); const button = document.getElementById('send');
-const status = document.getElementById('status'); const filesLabel = document.getElementById('files');
-input.addEventListener('change',()=>{const files=[...input.files];button.disabled=!files.length;filesLabel.textContent=files.map(f=>`${f.name} · ${(f.size/1048576).toFixed(1)} MB`).join('\\n');status.textContent=files.length?`${files.length} imagem(ns) selecionada(s).`:'';});
-button.addEventListener('click',async()=>{const files=[...input.files];if(!files.length)return;button.disabled=true;let sent=0;const errors=[];for(const file of files){status.textContent=`Enviando ${sent+1} de ${files.length}: ${file.name}`;try{const response=await fetch(`/api/upload/${token}`,{method:'POST',headers:{'Content-Type':file.type||'application/octet-stream','X-Filename':encodeURIComponent(file.name)},body:file});const result=await response.json();if(!response.ok||!result.ok)throw new Error(result.error||'Falha no envio.');sent++;}catch(error){errors.push(`${file.name}: ${error.message||'falha no envio'}`);}}status.textContent=`${sent} de ${files.length} imagem(ns) enviada(s).`+(errors.length?'\\n\\n'+errors.join('\\n'):'');if(sent===files.length){input.value='';filesLabel.textContent='';}button.disabled=!input.files.length;});
+const input = document.getElementById('photos');
+const button = document.getElementById('send');
+const status = document.getElementById('status');
+const filesLabel = document.getElementById('files');
+let pendingFiles = [];
+const uploadIds = new WeakMap();
+const uploadIdFor = file => {
+  if (!uploadIds.has(file)) {
+    const id = (window.crypto && crypto.randomUUID) ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+    uploadIds.set(file, id);
+  }
+  return uploadIds.get(file);
+};
+const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+// Renova a sessao sem depender do WebSocket do Streamlit.
+const keepAlive = () => fetch(`/api/ping/${token}`, {cache:'no-store'}).catch(() => {});
+setInterval(keepAlive, 3 * 60 * 1000);
+
+input.addEventListener('change', () => {
+  pendingFiles = [...input.files];
+  button.disabled = pendingFiles.length === 0;
+  filesLabel.textContent = pendingFiles.map(f => `${f.name} · ${(f.size/1048576).toFixed(1)} MB`).join('\\n');
+  status.textContent = pendingFiles.length ? `${pendingFiles.length} imagem(ns) selecionada(s).` : '';
+});
+
+function uploadOne(file, index, total, attempt) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', `/api/upload/${token}`, true);
+    xhr.timeout = 180000;
+    xhr.setRequestHeader('Content-Type', file.type || 'application/octet-stream');
+    xhr.setRequestHeader('X-Filename', encodeURIComponent(file.name));
+    xhr.setRequestHeader('X-Upload-Id', uploadIdFor(file));
+    xhr.upload.addEventListener('progress', event => {
+      if (event.lengthComputable) {
+        const pct = Math.round(event.loaded / event.total * 100);
+        status.textContent = `Enviando ${index} de ${total} · ${file.name} · ${pct}%` + (attempt ? ` · tentativa ${attempt + 1}` : '');
+      }
+    });
+    xhr.onload = () => {
+      let result = {};
+      try { result = JSON.parse(xhr.responseText || '{}'); } catch (_) {}
+      if (xhr.status >= 200 && xhr.status < 300 && result.ok) resolve(result);
+      else reject(new Error(result.error || `Servidor respondeu ${xhr.status}.`));
+    };
+    xhr.onerror = () => reject(new Error('Conexao interrompida durante o envio.'));
+    xhr.ontimeout = () => reject(new Error('O envio demorou mais que o limite de 3 minutos.'));
+    xhr.onabort = () => reject(new Error('Envio cancelado.'));
+    xhr.send(file);
+  });
+}
+
+async function uploadWithRetry(file, index, total) {
+  let lastError;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      return await uploadOne(file, index, total, attempt);
+    } catch (error) {
+      lastError = error;
+      if (attempt < 2) {
+        status.textContent = `${file.name}: falha temporaria. Tentando novamente (${attempt + 2}/3)…`;
+        await delay(700 * (attempt + 1));
+        await keepAlive();
+      }
+    }
+  }
+  throw lastError || new Error('Falha no envio.');
+}
+
+button.addEventListener('click', async () => {
+  const files = [...pendingFiles];
+  if (!files.length) return;
+  button.disabled = true;
+  const failed = [];
+  let sent = 0;
+  for (let index = 0; index < files.length; index++) {
+    const file = files[index];
+    status.textContent = `Preparando ${index + 1} de ${files.length}: ${file.name}`;
+    try {
+      await uploadWithRetry(file, index + 1, files.length);
+      sent++;
+    } catch (error) {
+      failed.push(file);
+    }
+  }
+  pendingFiles = failed;
+  if (!failed.length) {
+    status.textContent = `${sent} de ${files.length} imagem(ns) enviada(s) com sucesso. Pode voltar ao Atômica Print Lab.`;
+    input.value = '';
+    filesLabel.textContent = '';
+  } else {
+    status.textContent = `${sent} de ${files.length} imagem(ns) enviada(s). ${failed.length} falharam; toque novamente para reenviar somente as pendentes.`;
+    filesLabel.textContent = failed.map(f => `${f.name} · ${(f.size/1048576).toFixed(1)} MB`).join('\\n');
+  }
+  button.textContent = failed.length ? 'Tentar novamente as pendentes' : 'Enviar imagens';
+  button.disabled = failed.length === 0;
+});
 </script></body></html>""".replace("__TOKEN__", token_json)
