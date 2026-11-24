@@ -7192,7 +7192,7 @@ def main():
 
         st.info(
             "Também é possível enviar um arquivo de projeto .atp para retomar o trabalho exatamente de onde parou. "
-            "O aplicativo recupera o Pool, a ordem das artes, as quantidades, os originais, os fundos e as configurações salvas. "
+            "O aplicativo recupera o Pool, a ordem das artes, as quantidades, os arquivos originais, os fundos e todas as configurações salvas. "
             ,
             icon="📁",
         )
