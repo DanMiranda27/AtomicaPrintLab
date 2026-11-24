@@ -62,6 +62,14 @@ if errorlevel 1 (
     if errorlevel 1 goto erro_deps
 )
 
+rem ---------- 3e. Leitura de PDFs de projeto de versoes antigas ----------
+".venv\Scripts\python.exe" -c "import pypdf; assert int(pypdf.__version__.split('.')[0]) >= 5" >nul 2>&1
+if errorlevel 1 (
+    echo Instalando a dependencia para ler projetos PDF de versoes anteriores...
+    ".venv\Scripts\python.exe" -m pip install "pypdf>=5.0"
+    if errorlevel 1 goto erro_deps
+)
+
 rem ---------- 4. Evita o pedido de e-mail do Streamlit na 1a execucao ----------
 if exist "%USERPROFILE%\.streamlit\credentials.toml" goto cred_ok
 if not exist "%USERPROFILE%\.streamlit" mkdir "%USERPROFILE%\.streamlit"

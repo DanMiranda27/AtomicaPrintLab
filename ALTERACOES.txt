@@ -1,3 +1,115 @@
+VERSAO 3.43.0 - ARQUIVO DE PROJETO .ATP
+---------------------------------------
+- Criado o formato independente .atp, baseado em um pacote ZIP com manifesto JSON
+  versionado e ativos originais. O arquivo recupera o Pool completo, ordem,
+  quantidades, foco, imagens atuais/originais, fundos personalizados e ajustes.
+- Os ativos são endereçados por SHA-256 e deduplicados dentro do projeto. Imagens
+  já comprimidas são gravadas sem recompressão para reduzir o tempo de salvamento.
+- O uploader único agora reconhece .atp além de imagens e PDFs. A restauração valida
+  assinatura do formato, versão do manifesto, caminhos internos, integridade das
+  imagens e limites de tamanho antes de substituir o Pool atual.
+- A importação de PDFs com anexos de projeto antigos permanece para compatibilidade.
+- Os PDFs novos são somente para impressão: deixam de incorporar manifesto e ativos.
+  A exportação PDF convencional não precisa mais empacotar o Pool inteiro.
+- A interface oferece “Preparar arquivo de projeto (.atp)” e download separado.
+  O salvamento é independente da capacidade atual da folha de impressão.
+- O projeto registra também os cortes personalizados dos demais tamanhos já
+  configurados, além do papel, orientação, dimensão, margens, espaçamento, guias,
+  disposição e arte em foco.
+
+VALIDACAO TECNICA DA VERSAO 3.43.0
+---------------------------------
+- Compilação sintática dos módulos Python aprovada.
+- Testes isolados de geração, leitura e integridade do pacote .atp concluídos.
+- Confirmada deduplicação de ativos repetidos e recuperação de Pool, ordem,
+  quantidades, imagens originais/atuais, fundo personalizado e parâmetros.
+- A geração de PDF sem anexo permanece convencional e com MediaBox físico correto.
+- A interface Streamlit completa não foi iniciada neste ambiente; fluxo visual de
+  download, reupload e reconstrução deverá ser conferido no aplicativo em execução.
+
+VERSAO 3.42.4 - RODAPE SEM REDUZIR A AREA DE IMPRESSAO
+-------------------------------------------------------
+- Removida a reserva de 4,5 mm que reduzia a altura usada pelo cálculo de layout
+  e podia retirar uma fileira de bottons. A grade volta a usar a folha inteira
+  conforme as margens configuradas pelo usuário.
+- O texto Gochi Hand foi reposicionado para dentro da margem inferior existente.
+  Ele só é impresso/exibido quando a margem configurada é de pelo menos 4,5 mm;
+  com margens menores, é omitido para não sobrepor bottons ou marcas de corte.
+- A dimensão MediaBox do PDF continua definida exclusivamente por page_w/page_h;
+  nenhuma área extra é adicionada ou subtraída da página.
+
+VALIDACAO TECNICA DA VERSAO 3.42.4
+---------------------------------
+- Compilação sintática dos módulos Python.
+- Verificação estática de que nenhuma chamada de layout reserva área para o rodapé.
+- Conferência das chamadas da prévia e do PDF para usar a margem informada.
+- Integridade do ZIP e geometria de página de teste conferidas.
+- A interface Streamlit completa não foi iniciada neste ambiente.
+
+VERSAO 3.42.3 - ORIENTACAO VISIVEL NO UPLOAD
+------------------------------------------------
+- Adicionada uma mensagem informativa na etapa de upload explicando que o usuário
+  pode enviar o PDF original do Atômica Print Lab para retomar um projeto e
+  recuperar Pool, ordem, quantidades e configurações salvas.
+- Mantidos o uploader único, a identificação do PDF pelo manifesto interno e o
+  fluxo normal de upload de imagens.
+
+VALIDACAO TECNICA DA VERSAO 3.42.3
+---------------------------------
+- Compilação sintática dos módulos Python aprovada.
+- Conferência estática do texto informativo e do ramo de upload de PDF.
+- Integridade do pacote ZIP conferida.
+- A interface Streamlit completa não foi iniciada neste ambiente.
+
+VERSAO 3.42.2 - FONTE DA MARCA E AVISOS TEMPORARIOS
+----------------------------------------------------
+- O rodapé da prévia e do PDF exportado usa Gochi Hand, a mesma família
+  tipográfica da identidade visual. O ReportLab incorpora a fonte ao documento.
+  Quando o TTF não existe em assets, é obtido sob demanda do repositório oficial
+  Google Fonts e armazenado localmente; assets/OFL.txt acompanha a licença.
+- O carregamento de PDF sem manifesto/projeto válido utiliza st.toast em vez de
+  st.error, fazendo o aviso desaparecer automaticamente. Seleções que misturam
+  PDF e imagens também recebem notificação temporária.
+- O caminho de upload de imagens, a composição da folha, as dimensões físicas e
+  os dados incorporados nos PDFs permanecem inalterados.
+
+VALIDACAO TECNICA DA VERSAO 3.42.2
+---------------------------------
+- Compilação sintática dos módulos Python aprovada.
+- Conferência estática da chamada Gochi Hand no desenho da folha e dos avisos
+  temporários no ramo de carregamento de PDFs.
+- Integridade do pacote ZIP e dos arquivos-base conferida.
+- A interface Streamlit completa não foi iniciada neste ambiente; a aparência
+  visual da fonte e o tempo de desaparecimento do toast devem ser conferidos
+  na execução real do aplicativo.
+
+VERSAO 3.42.1 - PDF REEDITAVEL E IDENTIFICACAO DA FOLHA
+-------------------------------------------------------
+- O uploader principal continua sendo o único ponto de entrada e agora aceita
+  imagens ou um PDF. A identificação é feita pelo tipo/extensão e pela assinatura
+  do arquivo; o fluxo de imagens permanece separado e inalterado.
+- PDFs gerados pelo aplicativo recebem um anexo interno .atlp com manifesto JSON
+  versionado, imagens atuais e originais, fundos personalizados, Pool completo,
+  ordem, quantidades e parâmetros de edição por arte.
+- O reenvio do PDF pelo uploader reconstrói o Pool e restaura formato, tamanho,
+  corte personalizado, papel, orientação, dimensões personalizadas, margens,
+  espaçamento, disposição, guias e arte em foco.
+- PDFs sem o manifesto são reconhecidos como documentos sem projeto editável e
+  não substituem o Pool. A recuperação exata depende do PDF original exportado
+  pelo Atômica Print Lab, sem conversão ou reimpressão que remova anexos.
+- A identificação “Atômica Print Lab” aparece no rodapé de cada página do PDF.
+  A prévia da folha também exibe a marca e a disposição reserva uma faixa inferior
+  para impedir sobreposição com as artes.
+- A exportação preserva as dimensões físicas e as preferências de impressão 1:1.
+- Dependência adicionada: pypdf >= 5.0 para incorporar e ler o anexo interno.
+
+VALIDACAO TECNICA DA VERSAO 3.42.1
+---------------------------------
+- Compilação sintática do app.py aprovada.
+- Teste isolado de anexação e leitura do arquivo de projeto em PDF executado.
+- A interface Streamlit completa não foi iniciada neste ambiente; validar o
+  fluxo de upload e a aparência final em navegador/dispositivo real.
+
 VERSAO 3.42 - CONTROLES TOUCH E ESTABILIDADE DO UPLOAD MOVEL
 ----------------------------------------------------------------
 - Controles de selecao da interface substituidos por botoes Streamlit com

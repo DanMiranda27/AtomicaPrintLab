@@ -3,3 +3,4 @@ reportlab>=4.0
 pillow>=10.0
 qrcode[pil]>=7.4
 rembg[cpu]>=2.0.87
+pypdf>=5.0

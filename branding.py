@@ -13,6 +13,7 @@ import base64
 import io
 from functools import lru_cache
 from pathlib import Path
+from urllib.request import Request, urlopen
 
 import streamlit as st
 from PIL import Image
@@ -22,6 +23,30 @@ ICON_FILE = ASSETS / "icon.png"
 SIDEBAR_LOGO_FILE = ASSETS / "logo-atomica-print.png"
 HEADER_ILLUSTRATION_FILE = ASSETS / "erlenmeyer-lab.png"
 FONT_FILE = ASSETS / "GochiHand-Regular.ttf"
+GOCHI_FONT_URL = "https://raw.githubusercontent.com/google/fonts/main/ofl/gochihand/GochiHand-Regular.ttf"
+
+
+@lru_cache(maxsize=1)
+def sheet_font_path() -> Path | None:
+    """Retorna Gochi Hand para desenho raster/PDF; baixa uma cópia local se necessário."""
+    if FONT_FILE.is_file():
+        return FONT_FILE
+    try:
+        request = Request(GOCHI_FONT_URL, headers={"User-Agent": "AtomicaPrintLab/3.43.0"})
+        with urlopen(request, timeout=8) as response:
+            payload = response.read(500_001)
+        # Gochi Hand é um TTF TrueType estático; rejeita HTML/erros e respostas excessivas.
+        if not (20_000 <= len(payload) <= 500_000 and payload.startswith(b"\x00\x01\x00\x00")):
+            return None
+        ASSETS.mkdir(parents=True, exist_ok=True)
+        temporary = FONT_FILE.with_name(FONT_FILE.name + ".tmp")
+        temporary.write_bytes(payload)
+        temporary.replace(FONT_FILE)
+        return FONT_FILE
+    except Exception:
+        # A aplicação continua funcional offline, usando a fonte alternativa disponível.
+        return None
+
 
 BRAND_PRE, BRAND_POST = "Atômica ", "Print"  # a 2ª parte é destacada em magenta
 BRAND_NAME = BRAND_PRE + BRAND_POST

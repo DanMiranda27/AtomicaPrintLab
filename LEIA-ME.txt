@@ -1,6 +1,60 @@
-ATOMICA PRINT LAB - CRIAR BOTTONS (v3.42)
+ATOMICA PRINT LAB - CRIAR BOTTONS (v3.43.0)
 ==========================================
 
+
+NOVIDADES DA VERSAO 3.43.0
+-------------------------
+- Criado o formato de projeto independente .atp. O arquivo guarda o Pool completo,
+  ordem, quantidades, arte em foco, imagens atuais e originais, fundos personalizados,
+  parâmetros de edição e configurações de impressão.
+- O .atp é gerado separadamente da folha. Ativos idênticos são armazenados uma única
+  vez; imagens já compactadas não são recomprimidas, reduzindo o trabalho de CPU.
+- O mesmo uploader aceita .atp e restaura o projeto. PDFs com anexos de projeto
+  criados em versões anteriores continuam aceitos para compatibilidade.
+- O PDF gerado a partir desta versão é convencional e destinado exclusivamente à
+  impressão. Não incorpora manifesto nem imagens originais, tornando a exportação
+  mais leve e rápida. O rodapé Gochi Hand e a geometria física da folha permanecem.
+- A área de salvamento do .atp é independente da capacidade atual da folha; o projeto
+  pode ser guardado mesmo quando as margens configuradas impedem a impressão.
+
+NOVIDADES DA VERSAO 3.42.4
+-------------------------
+- Corrigido o rodapé para não reservar faixa adicional na folha nem alterar o
+  posicionamento/capacidade dos bottons. A geometria física A4/A3/Letter ou
+  personalizada permanece igual à configurada.
+- A identificação Gochi Hand agora fica dentro da margem inferior já existente.
+  Para margens menores que 4,5 mm, o rodapé visual é omitido para não invadir a
+  área de corte nem forçar redução da impressão.
+
+NOVIDADES DA VERSAO 3.42.3
+-------------------------
+- A etapa de upload agora informa de forma visível que um PDF original exportado
+  pelo Atômica Print Lab pode ser enviado para retomar o projeto, recuperando Pool,
+  ordem das artes, quantidades e configurações salvas.
+
+NOVIDADES DA VERSAO 3.42.2
+-------------------------
+- O nome “Atômica Print Lab” no rodapé da prévia e de cada página do PDF agora
+  usa Gochi Hand, alinhada à tipografia da identidade visual do aplicativo. A fonte
+  é incorporada ao PDF exportado.
+- Se o arquivo TTF ainda não existir em assets, o aplicativo tenta obtê-lo sob
+  demanda do repositório oficial Google Fonts e o mantém em cache local. A licença
+  OFL já acompanha o pacote. Sem conexão, a renderização usa uma fonte alternativa.
+- O aviso para PDFs sem projeto interno, PDFs inválidos ou seleções que misturam
+  PDF e imagens passa a ser exibido como notificação temporária, sem permanecer
+  fixo na tela.
+
+NOVIDADES DA VERSAO 3.42.1
+-------------------------
+- O upload principal aceita imagens e PDFs. PDFs exportados pelo Atômica Print Lab
+  reabrem o projeto completo pelo mesmo seletor, restaurando Pool, ordem,
+  quantidades, imagens originais, fundos personalizados e ajustes por arte.
+- O PDF passa a carregar um arquivo de projeto interno versionado; esse anexo
+  não altera a aparência nem a geometria imprimível do documento.
+- PDFs sem o anexo de projeto são identificados e não são tratados como projetos
+  editáveis. A recuperação exata exige o PDF original exportado pelo aplicativo.
+- Cada página da folha recebe a identificação discreta “Atômica Print Lab” no
+  rodapé, sem alterar as dimensões físicas da página.
 
 NOVIDADES DA VERSAO 3.42
 -----------------------
@@ -29,7 +83,7 @@ COMO USAR (WINDOWS)
 -------------------
 1. Instale Python 3.12 (https://www.python.org/downloads/), se ainda não tiver.
    Esta versão requer Python 3.11, 3.12 ou 3.13. Marque "Add python.exe to PATH".
-2. Extraia a pasta atomica_package_v3_42 em um local do computador.
+2. Extraia a pasta atomica_package_v3_43_0 em um local do computador.
 3. Execute iniciar.bat.
 
 Na primeira execução, o programa cria o ambiente virtual e instala as dependências.
@@ -55,7 +109,8 @@ ORGANIZACAO E FUNCIONALIDADES
 -----------------------------
 A ferramenta permanece em uma única sessão Criar Bottons, com o mesmo pool e o
 mesmo editor visual. O preview selecionado é usado para editar a arte, exportar PNG
-e montar a folha de impressão em PDF. Os ajustes individuais por arte, quantidades,
+e montar a folha de impressão em PDF. Projetos completos são salvos separadamente
+no formato .atp, independente da exportação de impressão. Os ajustes individuais por arte, quantidades,
 ordenação, preencher folha, guias, margens e espaçamentos são preservados da v3.13.
 - O editor possui três áreas principais: Enquadrar, Luz e cor e Fundo & Borda. Os ajustes
   em lote ficam em uma seção compacta separada, logo abaixo do título do painel.
@@ -73,6 +128,7 @@ ARQUIVOS
 iniciar.bat                       Inicia o app e prepara o ambiente virtual
 app.py                            Código do aplicativo
 branding.py                       Identidade visual do Atômica Print Lab
+requirements.txt                  Dependências do aplicativo; pypdf mantém leitura de PDFs de projetos antigos
 assets/icon.png                   Ícone da aba do navegador
 assets/logo-atomica-print.png     Logo principal da barra lateral
 assets/erlenmeyer-lab.png         Ilustração de química no cabeçalho
@@ -126,6 +182,17 @@ que solicita diretamente o diálogo de impressão do navegador, sem abrir uma
 prévia ou nova aba. O botão de download continua disponível separadamente. Se o
 navegador bloquear a impressão direta do PDF incorporado, baixe o arquivo e use
 Ctrl+P. No diálogo, selecione “Tamanho real” ou “100%” e desative “Ajustar à página”.
+
+ARQUIVO DE PROJETO .ATP
+-----------------------
+Na seção “Salvar Projeto”, use “Preparar arquivo de projeto (.atp)” e depois
+“Baixar projeto .atp”. O arquivo é independente do PDF e contém o Pool completo,
+a ordem das artes, as quantidades, o foco de edição, imagens originais e atuais,
+fundos personalizados, parâmetros individuais e configurações da folha.
+Para continuar o trabalho, selecione o arquivo .atp no mesmo uploader usado para
+adicionar imagens. Envie um único arquivo .atp por vez, sem misturá-lo com imagens.
+PDFs de projeto gerados pelas versões anteriores continuam aceitos quando mantêm
+o anexo interno original. Os PDFs novos são somente para impressão.
 
 SALVAMENTO INDIVIDUAL DAS ARTES
 -------------------------------

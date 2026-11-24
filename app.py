@@ -1,5 +1,5 @@
 """
-Atômica Print Lab · Criar Bottons (Streamlit) v3.42
+Atômica Print Lab · Criar Bottons (Streamlit) v3.43.0
 
 Guias (do centro para fora):
     Segurança  → textos / informações importantes devem ficar dentro dela
@@ -17,8 +17,10 @@ from __future__ import annotations
 import base64
 import hashlib
 import io
+import json
 import math
 import re
+import zipfile
 from dataclasses import dataclass, replace
 from typing import Literal
 
@@ -28,6 +30,8 @@ from PIL import Image, ImageChops, ImageColor, ImageDraw, ImageFilter, ImageOps
 from reportlab.lib.colors import HexColor, black
 from reportlab.lib.units import mm
 from reportlab.lib.utils import ImageReader
+from reportlab.pdfbase import pdfmetrics
+from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.pdfgen import canvas
 
 import branding as brand
@@ -66,7 +70,7 @@ class Guide:
 BUTTONS: dict[str, ButtonSpec] = dict(sorted({
     "18 mm": ButtonSpec(size=18, cut=29, fold=24, art=18, safe=12),
     "26 mm": ButtonSpec(size=26, cut=37, fold=31, art=26, safe=24),
-    "32 mm": ButtonSpec(size=32, cut=45, fold=41, art=32, safe=30),
+    "32 mm": ButtonSpec(size=32, cut=44, fold=41, art=32, safe=30),
     "33 mm": ButtonSpec(size=33, cut=44, fold=41, art=33, safe=30),
     "35 mm": ButtonSpec(size=35, cut=48, fold=41, art=35, safe=32),
     "37 mm": ButtonSpec(size=37, cut=46, fold=41, art=37, safe=34),
@@ -289,14 +293,16 @@ def covers_shape(box, diameter: float) -> bool:
     return x <= -r + 1e-6 and y <= -r + 1e-6 and x + w >= r - 1e-6 and y + h >= r - 1e-6
 
 
-def compute_layout(page_w: float, page_h: float, d: float, margin: float, gap: float, mode: str):
+def compute_layout(page_w: float, page_h: float, d: float, margin: float, gap: float, mode: str, reserved_bottom: float = 0.0):
     """
     Centros (x, y) em mm, com origem no canto SUPERIOR esquerdo da folha,
     ordenados da esquerda para a direita e de cima para baixo.
     mode: "grid" (alinhado) ou "hex" (colunas alternadas, mais compacto).
     """
     pitch = d + gap
-    usable_w, usable_h = page_w - 2 * margin, page_h - 2 * margin
+    reserved_bottom = max(0.0, float(reserved_bottom))
+    content_h = max(0.0, page_h - reserved_bottom)
+    usable_w, usable_h = page_w - 2 * margin, content_h - 2 * margin
     if usable_w < d - 1e-9 or usable_h < d - 1e-9:
         return []
 
@@ -318,7 +324,7 @@ def compute_layout(page_w: float, page_h: float, d: float, margin: float, gap: f
     min_x, max_x = min(p[0] for p in pts) - d / 2, max(p[0] for p in pts) + d / 2
     min_y, max_y = min(p[1] for p in pts) - d / 2, max(p[1] for p in pts) + d / 2
     dx = (page_w - (max_x - min_x)) / 2 - min_x
-    dy = (page_h - (max_y - min_y)) / 2 - min_y
+    dy = (content_h - (max_y - min_y)) / 2 - min_y
     return [(x + dx, y + dy) for x, y in pts]
 
 
@@ -1425,6 +1431,7 @@ def render_mixed_sheet_preview(
     items, placements, page_w, page_h, *, zoom=1.0, off_x=0.0, off_y=0.0,
     bg="#FFFFFF", guides=tuple(g.key for g in GUIDES), fit_mode="cut",
     blur_fill=True, blur_mm=0.5, background_mode=None, background_image=None,
+    footer_margin_mm=5.0,
 ) -> Image.Image:
     """Prévia de uma folha com arte e escala física visual estável por orientação."""
     ppm = sheet_preview_pixels_per_mm(page_w, page_h)
@@ -1449,7 +1456,377 @@ def render_mixed_sheet_preview(
             (round(cx * ppm - button.width / 2), round(cy * ppm - button.height / 2)),
             button,
         )
+    _draw_sheet_brand_footer_pil(sheet, ppm, footer_margin_mm)
     return sheet
+
+
+# ----------------------------------------------------------------------------
+# Projeto reeditável e identificação da folha
+# ----------------------------------------------------------------------------
+
+PROJECT_ARCHIVE_NAME = "atomica_print_lab_project.atlp"  # compatibilidade com PDFs de projeto antigos
+PROJECT_MANIFEST_NAME = "manifest.json"
+PROJECT_SCHEMA_VERSION = 1
+PROJECT_MAX_UNCOMPRESSED_BYTES = 500 * 1024 * 1024
+PROJECT_MAX_UPLOAD_BYTES = 190 * 1024 * 1024
+PROJECT_MAX_ITEMS = 5000
+SHEET_FOOTER_MIN_MARGIN_MM = 4.5
+
+
+def _json_safe(value):
+    """Converte parâmetros do projeto para JSON sem serializar conteúdo binário."""
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, bytes):
+        raise TypeError("O projeto contém dados binários fora da seção de arquivos." )
+    if isinstance(value, dict):
+        return {str(k): _json_safe(v) for k, v in value.items() if not str(k).startswith("_")}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(v) for v in value]
+    return str(value)
+
+
+def _project_asset_path(archive, data: bytes, cache: dict[str, str]) -> str:
+    """Grava cada ativo uma única vez, indexado pelo SHA-256 do conteúdo."""
+    digest = hashlib.sha256(data).hexdigest()
+    existing = cache.get(digest)
+    if existing:
+        return existing
+    path = f"assets/{digest}.bin"
+    # Fotos PNG/JPEG/WebP já são comprimidas. ZIP_STORED evita gastar CPU
+    # recomprimindo-as e torna a gravação do .atp mais rápida.
+    archive.writestr(path, data, compress_type=zipfile.ZIP_STORED)
+    cache[digest] = path
+    return path
+
+
+def build_atomica_project_archive(artwork_items, settings) -> bytes:
+    """Gera um .atp independente com Pool, originais, fundos e parâmetros."""
+    items = list(artwork_items or [])
+    if not items:
+        raise ValueError("Adicione pelo menos uma arte ao Pool antes de salvar o projeto.")
+    if len(items) > PROJECT_MAX_ITEMS:
+        raise ValueError(f"O projeto excede o limite de {PROJECT_MAX_ITEMS} artes.")
+
+    manifest = {
+        "format": "atomica-print-lab-project",
+        "container_format": "atp",
+        "schema_version": PROJECT_SCHEMA_VERSION,
+        "app_version": "3.43.0",
+        "created_by": "Atômica Print Lab",
+        "settings": _json_safe(settings),
+        "items": [],
+    }
+    buffer = io.BytesIO()
+    asset_cache: dict[str, str] = {}
+    with zipfile.ZipFile(buffer, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=1) as archive:
+        for index, item in enumerate(items):
+            item_id = int(item.get("id", index + 1))
+            image_bytes = item.get("image") or item.get("original_image")
+            original_bytes = item.get("original_image") or image_bytes
+            if not isinstance(image_bytes, bytes) or not image_bytes:
+                raise ValueError(f"A arte {index + 1} não possui uma imagem válida para salvar.")
+            if not isinstance(original_bytes, bytes) or not original_bytes:
+                raise ValueError(f"A imagem original da arte {index + 1} não está disponível.")
+
+            image_path = _project_asset_path(archive, image_bytes, asset_cache)
+            original_path = _project_asset_path(archive, original_bytes, asset_cache)
+            edit = dict(item.get("edit") or {})
+            background_bytes = edit.pop("background_image_bytes", None)
+            if background_bytes is not None and not isinstance(background_bytes, bytes):
+                raise ValueError(f"O fundo personalizado da arte {index + 1} possui formato inválido.")
+            background_path = (
+                _project_asset_path(archive, background_bytes, asset_cache)
+                if background_bytes else None
+            )
+            manifest["items"].append({
+                "id": item_id,
+                "name": str(item.get("name") or f"Arte {index + 1}"),
+                "qty": max(1, min(2000, int(item.get("qty", 1) or 1))),
+                "image_path": image_path,
+                "original_image_path": original_path,
+                "image_digest": hashlib.sha256(image_bytes).hexdigest(),
+                "original_image_digest": hashlib.sha256(original_bytes).hexdigest(),
+                "background_image_path": background_path,
+                "edit": _json_safe(edit),
+            })
+        archive.writestr(
+            PROJECT_MANIFEST_NAME,
+            json.dumps(manifest, ensure_ascii=False, separators=(",", ":")).encode("utf-8"),
+            compress_type=zipfile.ZIP_DEFLATED,
+            compresslevel=1,
+        )
+
+    payload = buffer.getvalue()
+    if len(payload) > PROJECT_MAX_UPLOAD_BYTES:
+        raise ValueError(
+            "O projeto ficou maior que 190 MB e ultrapassa o limite de reenvio do aplicativo. "
+            "Remova artes que não fazem parte deste trabalho ou salve-as em projetos separados."
+        )
+    return payload
+
+
+def atomica_project_export_signature(artwork_items, settings) -> str:
+    """Assinatura leve para não oferecer um .atp antigo após alterações no projeto."""
+    summary = []
+    for item in artwork_items or []:
+        edit = dict(item.get("edit") or {})
+        background_bytes = edit.pop("background_image_bytes", None)
+        summary.append({
+            "id": int(item.get("id", 0)),
+            "name": str(item.get("name") or ""),
+            "qty": int(item.get("qty", 1) or 1),
+            "image_digest": str(item.get("image_digest") or hashlib.sha256(item.get("image") or b"").hexdigest()),
+            "original_image_digest": str(item.get("original_image_digest") or hashlib.sha256(item.get("original_image") or b"").hexdigest()),
+            "background_digest": hashlib.sha256(background_bytes).hexdigest() if background_bytes else "",
+            "edit": _json_safe(edit),
+        })
+    payload = {"settings": _json_safe(settings), "items": summary}
+    encoded = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def attach_atomica_project(pdf_bytes: bytes, project_archive: bytes) -> bytes:
+    """Mantido apenas para compatibilidade com fluxos internos/arquivos antigos."""
+    from pypdf import PdfReader, PdfWriter
+    reader = PdfReader(io.BytesIO(pdf_bytes), strict=False)
+    writer = PdfWriter()
+    writer.clone_document_from_reader(reader)
+    writer.add_attachment(PROJECT_ARCHIVE_NAME, project_archive)
+    metadata = dict(reader.metadata or {})
+    metadata.update({"/Creator": "Atômica Print Lab", "/Producer": "Atômica Print Lab · PDF reeditável"})
+    writer.add_metadata(metadata)
+    output = io.BytesIO()
+    writer.write(output)
+    return output.getvalue()
+
+
+def restore_atomica_project_from_archive(project_bytes: bytes) -> dict:
+    """Valida e reconstrói o conteúdo de um pacote .atp ou .atlp."""
+    if not isinstance(project_bytes, bytes) or not project_bytes:
+        raise ValueError("O arquivo de projeto está vazio.")
+    if len(project_bytes) > PROJECT_MAX_UPLOAD_BYTES:
+        raise ValueError("O arquivo de projeto ultrapassa o limite de 190 MB do aplicativo.")
+    try:
+        with zipfile.ZipFile(io.BytesIO(project_bytes), "r") as archive:
+            infos = archive.infolist()
+            if len(infos) > (PROJECT_MAX_ITEMS * 3 + 2):
+                raise ValueError("O projeto contém um número excessivo de arquivos internos.")
+            names = {info.filename for info in infos}
+            if PROJECT_MANIFEST_NAME not in names:
+                raise ValueError("Este arquivo não contém um manifesto de projeto do Atômica Print Lab.")
+            manifest_info = archive.getinfo(PROJECT_MANIFEST_NAME)
+            if manifest_info.file_size > 10 * 1024 * 1024:
+                raise ValueError("O manifesto do projeto excede o limite permitido.")
+            manifest = json.loads(archive.read(PROJECT_MANIFEST_NAME).decode("utf-8"))
+            if manifest.get("format") != "atomica-print-lab-project":
+                raise ValueError("Este arquivo não é um projeto do Atômica Print Lab.")
+            schema_version = int(manifest.get("schema_version", 0))
+            if schema_version != PROJECT_SCHEMA_VERSION:
+                raise ValueError("A versão dos dados deste projeto não é compatível com esta versão do aplicativo.")
+
+            records = manifest.get("items", [])
+            if not isinstance(records, list) or not records or len(records) > PROJECT_MAX_ITEMS:
+                raise ValueError("O projeto não contém uma lista válida de artes.")
+
+            restored, total_bytes, blob_cache = [], 0, {}
+            for record in records:
+                blobs = {}
+                for key in ("image_path", "original_image_path", "background_image_path"):
+                    path = record.get(key)
+                    if not path:
+                        continue
+                    # Os caminhos são nomes internos do ZIP, nunca caminhos do sistema.
+                    if (
+                        not isinstance(path, str) or path not in names or path.startswith("/")
+                        or "\\" in path or ".." in path.split("/")
+                    ):
+                        raise ValueError("O projeto contém um arquivo de arte ausente ou inválido.")
+                    if path not in blob_cache:
+                        info = archive.getinfo(path)
+                        if info.file_size < 1:
+                            raise ValueError("O projeto contém uma imagem vazia.")
+                        total_bytes += int(info.file_size)
+                        if total_bytes > PROJECT_MAX_UNCOMPRESSED_BYTES:
+                            raise ValueError("O projeto excede o limite de 500 MB para restauração.")
+                        blob_cache[path] = archive.read(path)
+                    blobs[path] = blob_cache[path]
+
+                image_path = record.get("image_path")
+                original_path = record.get("original_image_path")
+                if not image_path or not original_path or image_path not in blobs or original_path not in blobs:
+                    raise ValueError("O projeto não contém a imagem atual e a original de uma das artes.")
+                image_bytes = blobs[image_path]
+                original_bytes = blobs[original_path]
+                image_digest = hashlib.sha256(image_bytes).hexdigest()
+                original_digest = hashlib.sha256(original_bytes).hexdigest()
+                expected_image_digest = str(record.get("image_digest") or image_digest)
+                expected_original_digest = str(record.get("original_image_digest") or original_digest)
+                if expected_image_digest != image_digest or expected_original_digest != original_digest:
+                    raise ValueError("Uma das imagens do projeto está corrompida ou foi alterada.")
+
+                edit = dict(record.get("edit") or {})
+                bg_path = record.get("background_image_path")
+                edit["background_image_bytes"] = blobs.get(bg_path) if bg_path else None
+                restored.append({
+                    "id": int(record.get("id", len(restored) + 1)),
+                    "name": str(record.get("name") or f"Arte {len(restored) + 1}"),
+                    "image": image_bytes,
+                    "image_digest": image_digest,
+                    "original_image": original_bytes,
+                    "original_image_digest": original_digest,
+                    "qty": max(1, min(2000, int(record.get("qty", 1) or 1))),
+                    "edit": edit,
+                })
+            if not restored:
+                raise ValueError("O arquivo não contém artes recuperáveis no projeto.")
+            return {"settings": manifest.get("settings") or {}, "items": restored}
+    except ValueError:
+        raise
+    except (zipfile.BadZipFile, json.JSONDecodeError, KeyError, TypeError, OSError) as exc:
+        raise ValueError("Não foi possível ler o arquivo .atp. O arquivo pode estar incompleto ou corrompido.") from exc
+
+
+def restore_atomica_project_from_atp(project_bytes: bytes) -> dict:
+    """Reconhece o formato .atp e delega a validação do pacote interno."""
+    if not isinstance(project_bytes, bytes) or not project_bytes.startswith(b"PK"):
+        raise ValueError("O arquivo selecionado não parece ser um projeto .atp válido.")
+    return restore_atomica_project_from_archive(project_bytes)
+
+
+def restore_atomica_project_from_pdf(pdf_bytes: bytes) -> dict:
+    """Abre projetos embutidos em PDFs antigos, mantendo compatibilidade retroativa."""
+    from pypdf import PdfReader
+    reader = PdfReader(io.BytesIO(pdf_bytes), strict=False)
+    candidates = []
+    for filename, payloads in reader.attachments.items():
+        if str(filename).lower().endswith((".atlp", ".atp", ".zip")):
+            candidates.extend(payloads if isinstance(payloads, list) else [payloads])
+    for payload in candidates:
+        try:
+            return restore_atomica_project_from_archive(payload)
+        except ValueError:
+            continue
+    raise ValueError(
+        "Este PDF não contém um projeto editável do Atômica Print Lab. "
+        "PDFs comuns ou versões antigas sem dados internos não permitem recuperar o Pool e os ajustes originais."
+    )
+
+
+def _apply_pending_atomica_project_restore() -> None:
+    pending = st.session_state.pop("_pending_atomica_project_restore", None)
+    if not isinstance(pending, dict):
+        return
+    settings, items = pending.get("settings") or {}, pending.get("items") or []
+    size_key = str(settings.get("size_key") or "44 mm")
+    if size_key not in BUTTONS:
+        size_key = "44 mm"
+    base_spec = BUTTONS[size_key]
+    shape = str(settings.get("shape") or base_spec.shape)
+    if shape != base_spec.shape:
+        size_key = next((key for key, value in BUTTONS.items() if value.shape == shape), size_key)
+        base_spec = BUTTONS[size_key]
+    cut = _clamp_cut_diameter(settings.get("cut_diameter", base_spec.cut), base_spec)
+    paper = str(settings.get("paper_size") or "A4")
+    if paper not in [*PAPERS, "Personalizado"]:
+        paper = "A4"
+    orientation = str(settings.get("page_orientation") or "Retrato")
+    if orientation not in {"Retrato", "Paisagem"}:
+        orientation = "Retrato"
+    custom_w = float(settings.get("custom_page_w", 210.0) or 210.0)
+    custom_h = float(settings.get("custom_page_h", 297.0) or 297.0)
+    raw_w, raw_h = (custom_w, custom_h) if paper == "Personalizado" else PAPERS[paper]
+    page_w, page_h = (min(raw_w, raw_h), max(raw_w, raw_h)) if orientation == "Retrato" else (max(raw_w, raw_h), min(raw_w, raw_h))
+    layout = str(settings.get("layout_label") or "Grade")
+    if layout.startswith("Hexagonal") and shape != "circle":
+        layout = "Grade"
+    old_ids = {int(item.get("id", -1)) for item in st.session_state.get("artwork_items", []) if isinstance(item, dict)}
+    new_ids = {int(item.get("id", -1)) for item in items if isinstance(item, dict)}
+    for item_id in old_ids | new_ids:
+        prefixes = (f"artwork_{item_id}_", f"artwork_color_picker_{item_id}_")
+        exact_keys = {
+            f"remove_custom_background_{item_id}", f"reset_image_adjustments_{item_id}",
+            f"pool_select_{item_id}", f"pool_batch_select_{item_id}", f"pool_qty_input_{item_id}",
+            f"pool_plus_{item_id}", f"pool_minus_{item_id}", f"pool_up_{item_id}",
+            f"pool_down_{item_id}", f"pool_remove_{item_id}",
+        }
+        for key in list(st.session_state.keys()):
+            if key in exact_keys or any(str(key).startswith(prefix) for prefix in prefixes):
+                st.session_state.pop(key, None)
+    st.session_state.pop("artwork_pool_ui", None)
+    st.session_state["format_label"] = "Quadrado" if shape == "square" else "Redondo"
+    st.session_state["single_size"] = size_key
+    st.session_state["paper_size"] = paper
+    st.session_state["page_orientation"] = orientation
+    st.session_state["custom_page_w"] = custom_w
+    st.session_state["custom_page_h"] = custom_h
+    st.session_state["margin_mm"] = float(settings.get("margin_mm", 5.0))
+    st.session_state["gap_mm"] = float(settings.get("gap_mm", 3.0))
+    st.session_state["layout_label"] = layout
+    overrides = st.session_state.setdefault("_cut_diameter_overrides", {})
+    saved_overrides = settings.get("cut_diameter_overrides", {})
+    if isinstance(saved_overrides, dict):
+        for saved_key, saved_value in saved_overrides.items():
+            if saved_key in BUTTONS:
+                overrides[str(saved_key)] = _clamp_cut_diameter(saved_value, BUTTONS[str(saved_key)])
+    overrides[size_key] = cut
+    st.session_state[_cut_diameter_widget_key(size_key)] = cut
+    guides = set(settings.get("guides") or ["cut"])
+    for guide in GUIDES:
+        st.session_state[f"guide_single_{guide.key}"] = guide.key in guides
+    for item in items:
+        item.setdefault("thumbnail_data_url", thumbnail_data_url(item["image_digest"], item["image"]))
+        item.setdefault("original_image", item["image"])
+        item.setdefault("original_image_digest", item["image_digest"])
+    st.session_state["artwork_items"] = items
+    st.session_state["artwork_next_id"] = max((int(item["id"]) for item in items), default=0) + 1
+    selected_id = settings.get("selected_id")
+    valid_ids = {int(item["id"]) for item in items}
+    st.session_state["artwork_selected_id"] = int(selected_id) if selected_id is not None and int(selected_id) in valid_ids else int(items[0]["id"])
+    st.session_state["artwork_batch_selected_ids"] = []
+    st.session_state["artwork_upload_revision"] = int(st.session_state.get("artwork_upload_revision", 0)) + 1
+    st.session_state["_artwork_upload_processed_signatures"] = []
+    st.session_state["_layout_profile_schema"] = 2
+    profile_key = layout_settings_profile_key(paper, page_w, page_h, size_key, shape)
+    st.session_state["_layout_profile_key"] = profile_key
+    profiles = st.session_state.setdefault("_layout_profiles", {})
+    profiles[profile_key] = {"margin_mm": st.session_state["margin_mm"], "gap_mm": st.session_state["gap_mm"], "layout_label": layout}
+    st.session_state["_atomica_project_restored_notice"] = True
+
+
+def _sheet_brand_pdf_font_name() -> str:
+    """Registra Gochi Hand no ReportLab para incorporá-la ao PDF final."""
+    try:
+        font_path = brand.sheet_font_path()
+        if font_path:
+            font_name = "AtomicaGochiHand"
+            if font_name not in pdfmetrics.getRegisteredFontNames():
+                pdfmetrics.registerFont(TTFont(font_name, str(font_path)))
+            return font_name
+    except Exception:
+        pass
+    return "Helvetica"
+
+
+def _draw_sheet_brand_footer_pil(
+    sheet: Image.Image, ppm: float, margin_mm: float = 5.0
+) -> None:
+    """Desenha a marca dentro da margem já existente, sem reservar área da folha."""
+    if float(margin_mm) < SHEET_FOOTER_MIN_MARGIN_MM:
+        return
+    from PIL import ImageFont
+    font_size = max(7, round(2.0 * ppm))
+    try:
+        # Usa a mesma Gochi Hand da identidade visual. Se ainda não estiver
+        # no pacote, branding.py a obtém do repositório oficial do Google Fonts.
+        gochi_path = brand.sheet_font_path()
+        font = ImageFont.truetype(str(gochi_path), font_size) if gochi_path else ImageFont.truetype("DejaVuSans.ttf", font_size)
+    except Exception:
+        font = ImageFont.load_default()
+    ImageDraw.Draw(sheet).text(
+        (sheet.width / 2, sheet.height - 2.7 * ppm),
+        "Atômica Print Lab", fill="#626873", font=font, anchor="mm"
+    )
 
 
 # ----------------------------------------------------------------------------
@@ -1603,7 +1980,8 @@ def build_mixed_pdf(
 
 
 def build_art_batch_pdf(
-    items, positions, page_w, page_h, total_qty, *, bg, guides,
+    items, positions, page_w, page_h, total_qty, *, bg, guides, project_archive=None,
+    page_margin_mm=5.0,
 ) -> bytes:
     """Gera um PDF de tamanho único, repetindo cada arte conforme sua quantidade."""
     if not items or not positions or total_qty <= 0:
@@ -1616,6 +1994,7 @@ def build_art_batch_pdf(
     shape_title = "quadrado" if spec.shape == "square" else "redondo"
     c.setTitle(f"Folha de bottons {shape_title} {spec.size:g} mm")
     c.setCreator("Atômica Print Lab · Criar Bottons")
+    footer_font_name = _sheet_brand_pdf_font_name()
 
     image_buffers = []
     expanded_order = []
@@ -1660,11 +2039,20 @@ def build_art_batch_pdf(
             c.translate(px * mm, (page_h - py) * mm)
             c.doForm(f"art_button_{item_index}")
             c.restoreState()
+        # A identificação fica dentro da margem existente. Não altera o tamanho
+        # da página nem reduz a área usada para posicionar os bottons.
+        if float(page_margin_mm) >= SHEET_FOOTER_MIN_MARGIN_MM:
+            c.saveState()
+            c.setFont(footer_font_name, 6)
+            c.setFillColor(HexColor("#626873"))
+            c.drawCentredString((page_w * mm) / 2, 2.0 * mm, "Atômica Print Lab")
+            c.restoreState()
         if page_index < page_count - 1:
             c.showPage()
 
     c.save()
-    return buf.getvalue()
+    pdf_bytes = buf.getvalue()
+    return attach_atomica_project(pdf_bytes, project_archive) if project_archive else pdf_bytes
 
 
 @st.cache_data(show_spinner=False)
@@ -5176,6 +5564,7 @@ def render_mixed_sheet_preview_cached(
     bg: str,
     guides: tuple,
     preview_ppm: float | None = None,
+    footer_margin_mm: float = 5.0,
 ) -> Image.Image:
     """Monta a prévia reutilizando imagens de bottons já rasterizadas em cache.
 
@@ -5206,6 +5595,7 @@ def render_mixed_sheet_preview_cached(
             (round(cx * ppm - button.width / 2), round(cy * ppm - button.height / 2)),
             button,
         )
+    _draw_sheet_brand_footer_pil(sheet, ppm, footer_margin_mm)
     return sheet
 
 
@@ -6270,6 +6660,7 @@ def main():
         page_icon=brand.icon_image(),
         layout="wide",
     )
+    _apply_pending_atomica_project_restore()
     brand.apply_theme()
     st.markdown(
         """<style>
@@ -6588,6 +6979,8 @@ def main():
         unsafe_allow_html=True,
     )
     brand.render_header()
+    if st.session_state.pop("_atomica_project_restored_notice", False):
+        st.success("Projeto do Atômica Print Lab reaberto. Pool, ordem, quantidades e configurações foram restaurados.")
 
     st.session_state.setdefault("artwork_items", [])
     st.session_state.setdefault("artwork_next_id", 1)
@@ -6781,13 +7174,14 @@ def main():
         # novamente sem reenviar os que já entraram no Pool.
         with st.form(f"upload_artworks_{upload_revision}", clear_on_submit=False):
             uploaded_files = st.file_uploader(
-                "Selecione uma ou várias artes",
-                type=["png", "jpg", "jpeg", "webp"],
+                "Selecione imagens ou um projeto Atômica Print Lab (.atp)",
+                type=["png", "jpg", "jpeg", "webp", "pdf", "atp"],
                 accept_multiple_files=True,
                 max_upload_size=200,
                 key=f"artwork_file_uploader_{upload_revision}",
                 help=(
-                    "Cada arquivo será adicionado como uma arte independente. "
+                    "Imagens são adicionadas individualmente. Um arquivo .atp recupera o Pool completo e as configurações do projeto. "
+                    "PDFs de projeto exportados por versões anteriores também podem ser reabertos. "
                     "Em alguns celulares/tablets, o seletor do próprio sistema pode limitar a seleção múltipla; "
                     "nesse caso, adicione as imagens em etapas menores e confirme cada seleção. Se o seletor abrir outro aplicativo, retorne ao navegador sem fechar a página do editor."
                 ),
@@ -6795,6 +7189,13 @@ def main():
             add_uploads = st.form_submit_button(
                 "Adicionar imagens à lista", type="primary", use_container_width=True
             )
+
+        st.info(
+            "Também é possível enviar um arquivo de projeto .atp para retomar o trabalho exatamente de onde parou. "
+            "O aplicativo recupera o Pool, a ordem das artes, as quantidades, os originais, os fundos e as configurações salvas. "
+            "PDFs de projeto de versões anteriores continuam aceitos quando contêm os dados internos.",
+            icon="📁",
+        )
 
         st.caption(
             "No celular ou tablet, o seletor de arquivos pode levar alguns segundos para retornar ao navegador. "
@@ -6804,139 +7205,161 @@ def main():
         if add_uploads:
             from concurrent.futures import ThreadPoolExecutor, as_completed
 
-            added_ids = []
-            existing_ids_before_upload = {int(item["id"]) for item in st.session_state["artwork_items"]}
-            selected_before_upload = st.session_state.get("artwork_selected_id")
-            processed_signatures = set(st.session_state.get("_artwork_upload_processed_signatures", []))
-            files_to_prepare = []
-            failures = []
-
-            # A leitura é isolada por arquivo. Um item vazio/inacessível enviado
-            # pelo seletor móvel não deve invalidar os outros arquivos do lote.
-            for uploaded_file in (uploaded_files or []):
-                file_name = str(getattr(uploaded_file, "name", "imagem"))
-                try:
-                    image_bytes = uploaded_file.getvalue()
-                    if not image_bytes:
-                        raise ValueError(
-                            "O dispositivo retornou um arquivo vazio. Selecione a imagem novamente no app Arquivos ou Galeria."
-                        )
-                    digest = hashlib.sha256(image_bytes).hexdigest()
-                    signature = f"{file_name}|{len(image_bytes)}|{digest}"
-                    if signature in processed_signatures:
-                        continue
-                    files_to_prepare.append((file_name, image_bytes, digest, signature))
-                except Exception as exc:
-                    failures.append((file_name, str(exc) or "Não foi possível ler o arquivo enviado."))
-
-            if not uploaded_files:
-                st.warning(
-                    "Nenhuma imagem chegou ao editor. Volte ao seletor do dispositivo, confirme a seleção e tente novamente."
-                )
-            else:
-                prepared = [None] * len(files_to_prepare)
-                progress = st.progress(0, text="Preparando miniaturas…") if files_to_prepare else None
-                if files_to_prepare:
-                    # Dois workers equilibram paralelismo e memória ao lidar com
-                    # fotos grandes; cada falha é isolada para preservar os demais.
-                    with ThreadPoolExecutor(max_workers=min(2, len(files_to_prepare))) as executor:
-                        future_indexes = {
-                            executor.submit(prepare_uploaded_artwork, name, data): index
-                            for index, (name, data, _digest, _signature) in enumerate(files_to_prepare)
-                        }
-                        completed = 0
-                        for future in as_completed(future_indexes):
-                            index = future_indexes[future]
-                            try:
-                                prepared[index] = future.result()
-                            except Exception as exc:
-                                file_name = files_to_prepare[index][0]
-                                failures.append((file_name, str(exc) or "Formato de imagem inválido."))
-                            completed += 1
-                            progress.progress(
-                                completed / len(files_to_prepare),
-                                text=f"Preparando miniaturas… {completed}/{len(files_to_prepare)}",
-                            )
-                    progress.empty()
-
-                used_item_ids = {int(item.get("id", -1)) for item in st.session_state["artwork_items"]}
-                next_id = max(int(st.session_state.get("artwork_next_id", 1)), max(used_item_ids, default=0) + 1)
-                for index, (file_name, image_bytes, digest, signature) in enumerate(files_to_prepare):
-                    prepared_item = prepared[index]
-                    if prepared_item is None:
-                        continue
-                    thumb_digest, thumb_url = prepared_item
-                    item_id = next_id
-                    next_id += 1
-                    st.session_state["artwork_items"].append({
-                        "id": item_id,
-                        "name": file_name,
-                        "image": image_bytes,
-                        "image_digest": thumb_digest or digest,
-                        "original_image": image_bytes,
-                        "original_image_digest": thumb_digest or digest,
-                        "thumbnail_data_url": thumb_url,
-                        "qty": 1,
-                        "edit": {
-                            # Regra inicial: toda nova arte começa em Preencher até o Corte.
-                            # Um gesto manual desativa explicitamente esse preset.
-                            "zoom": 1.0,
-                            "initial_safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
-                            "offset_x": 0.0,
-                            "offset_y": 0.0,
-                            "transform_revision": 0,
-                            "event_seq": 0,
-                            "fit_basis_mode": "cut",
-                            "fit_cut_checked": True,
-                            "fit_art_checked": False,
-                            "manual_transform_active": False,
-                            "scale_reference_spec": _button_scale_profile(spec),
-                            "scale_reference_diameter": float(spec.safe),
-                            "safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
-                            "safety_relative_offset_x": 0.0,
-                            "safety_relative_offset_y": 0.0,
-                            "safety_transform_schema": 1,
-                            "initial_cut_fit_schema": 4,
-                            "background_mode": "Cor sólida",
-                            "blur_strength": 0.5,
-                            "background": "#FFFFFF",
-                            "blur_base_color": "#FFFFFF",
-                            "background_image_bytes": None,
-                            "background_image_digest": "",
-                            "background_image_name": "",
-                            "custom_background_active": False,
-                            "custom_background_pending": False,
-                            "background_upload_revision": 0,
-                            "custom_background_revision": 0,
-                            **IMAGE_ADJUSTMENT_DEFAULTS,
-                        },
-                    })
-                    added_ids.append(item_id)
-                    processed_signatures.add(signature)
-
-                st.session_state["artwork_next_id"] = next_id
-                st.session_state["_artwork_upload_processed_signatures"] = sorted(processed_signatures)
-
-                if added_ids and selected_before_upload not in existing_ids_before_upload:
-                    st.session_state["artwork_selected_id"] = added_ids[0]
-
-                if failures:
-                    st.warning(
-                        f"{len(failures)} arquivo(s) apresentaram problema. Os arquivos válidos foram adicionados; "
-                        "os que falharam continuam no seletor para nova tentativa."
-                    )
-                    with st.expander("Ver arquivos que precisam de atenção", expanded=True):
-                        for file_name, reason in failures:
-                            st.error(f"{file_name}: {reason}")
+            project_uploads = [
+                f for f in (uploaded_files or [])
+                if str(getattr(f, "name", "")).lower().endswith((".pdf", ".atp"))
+            ]
+            if project_uploads:
+                if len(project_uploads) != 1 or len(uploaded_files or []) != 1:
+                    st.toast("Envie um arquivo de projeto por vez, sem misturá-lo com imagens.", icon="⚠️")
                 else:
-                    # Só limpa o seletor quando todos os arquivos pendentes foram
-                    # processados. Isso evita perder a lista se um arquivo falhar.
-                    st.session_state["artwork_upload_revision"] += 1
-                    st.session_state["_artwork_upload_processed_signatures"] = []
-                    if added_ids:
-                        st.toast(f"{len(added_ids)} imagem(ns) adicionada(s) ao Pool.", icon="✅")
-                    st.rerun()
+                    uploaded_project = project_uploads[0]
+                    project_name = str(getattr(uploaded_project, "name", "")).lower()
+                    try:
+                        project_bytes = uploaded_project.getvalue()
+                        if project_name.endswith(".atp"):
+                            restored_project = restore_atomica_project_from_atp(project_bytes)
+                        else:
+                            if not project_bytes.startswith(b"%PDF-"):
+                                raise ValueError("O arquivo selecionado não parece ser um PDF válido.")
+                            restored_project = restore_atomica_project_from_pdf(project_bytes)
+                        st.session_state["_pending_atomica_project_restore"] = restored_project
+                        st.rerun(scope="app")
+                    except Exception as exc:
+                        st.toast(str(exc) or "Não foi possível reabrir este projeto.", icon="⚠️")
+            else:
+                added_ids = []
+                existing_ids_before_upload = {int(item["id"]) for item in st.session_state["artwork_items"]}
+                selected_before_upload = st.session_state.get("artwork_selected_id")
+                processed_signatures = set(st.session_state.get("_artwork_upload_processed_signatures", []))
+                files_to_prepare = []
+                failures = []
 
+                # A leitura é isolada por arquivo. Um item vazio/inacessível enviado
+                # pelo seletor móvel não deve invalidar os outros arquivos do lote.
+                for uploaded_file in (uploaded_files or []):
+                    file_name = str(getattr(uploaded_file, "name", "imagem"))
+                    try:
+                        image_bytes = uploaded_file.getvalue()
+                        if not image_bytes:
+                            raise ValueError(
+                                "O dispositivo retornou um arquivo vazio. Selecione a imagem novamente no app Arquivos ou Galeria."
+                            )
+                        digest = hashlib.sha256(image_bytes).hexdigest()
+                        signature = f"{file_name}|{len(image_bytes)}|{digest}"
+                        if signature in processed_signatures:
+                            continue
+                        files_to_prepare.append((file_name, image_bytes, digest, signature))
+                    except Exception as exc:
+                        failures.append((file_name, str(exc) or "Não foi possível ler o arquivo enviado."))
+
+                if not uploaded_files:
+                    st.warning(
+                        "Nenhuma imagem chegou ao editor. Volte ao seletor do dispositivo, confirme a seleção e tente novamente."
+                    )
+                else:
+                    prepared = [None] * len(files_to_prepare)
+                    progress = st.progress(0, text="Preparando miniaturas…") if files_to_prepare else None
+                    if files_to_prepare:
+                        # Dois workers equilibram paralelismo e memória ao lidar com
+                        # fotos grandes; cada falha é isolada para preservar os demais.
+                        with ThreadPoolExecutor(max_workers=min(2, len(files_to_prepare))) as executor:
+                            future_indexes = {
+                                executor.submit(prepare_uploaded_artwork, name, data): index
+                                for index, (name, data, _digest, _signature) in enumerate(files_to_prepare)
+                            }
+                            completed = 0
+                            for future in as_completed(future_indexes):
+                                index = future_indexes[future]
+                                try:
+                                    prepared[index] = future.result()
+                                except Exception as exc:
+                                    file_name = files_to_prepare[index][0]
+                                    failures.append((file_name, str(exc) or "Formato de imagem inválido."))
+                                completed += 1
+                                progress.progress(
+                                    completed / len(files_to_prepare),
+                                    text=f"Preparando miniaturas… {completed}/{len(files_to_prepare)}",
+                                )
+                        progress.empty()
+
+                    used_item_ids = {int(item.get("id", -1)) for item in st.session_state["artwork_items"]}
+                    next_id = max(int(st.session_state.get("artwork_next_id", 1)), max(used_item_ids, default=0) + 1)
+                    for index, (file_name, image_bytes, digest, signature) in enumerate(files_to_prepare):
+                        prepared_item = prepared[index]
+                        if prepared_item is None:
+                            continue
+                        thumb_digest, thumb_url = prepared_item
+                        item_id = next_id
+                        next_id += 1
+                        st.session_state["artwork_items"].append({
+                            "id": item_id,
+                            "name": file_name,
+                            "image": image_bytes,
+                            "image_digest": thumb_digest or digest,
+                            "original_image": image_bytes,
+                            "original_image_digest": thumb_digest or digest,
+                            "thumbnail_data_url": thumb_url,
+                            "qty": 1,
+                            "edit": {
+                                # Regra inicial: toda nova arte começa em Preencher até o Corte.
+                                # Um gesto manual desativa explicitamente esse preset.
+                                "zoom": 1.0,
+                                "initial_safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
+                                "offset_x": 0.0,
+                                "offset_y": 0.0,
+                                "transform_revision": 0,
+                                "event_seq": 0,
+                                "fit_basis_mode": "cut",
+                                "fit_cut_checked": True,
+                                "fit_art_checked": False,
+                                "manual_transform_active": False,
+                                "scale_reference_spec": _button_scale_profile(spec),
+                                "scale_reference_diameter": float(spec.safe),
+                                "safety_relative_zoom": float(spec.cut) / max(float(spec.safe), 1e-9),
+                                "safety_relative_offset_x": 0.0,
+                                "safety_relative_offset_y": 0.0,
+                                "safety_transform_schema": 1,
+                                "initial_cut_fit_schema": 4,
+                                "background_mode": "Cor sólida",
+                                "blur_strength": 0.5,
+                                "background": "#FFFFFF",
+                                "blur_base_color": "#FFFFFF",
+                                "background_image_bytes": None,
+                                "background_image_digest": "",
+                                "background_image_name": "",
+                                "custom_background_active": False,
+                                "custom_background_pending": False,
+                                "background_upload_revision": 0,
+                                "custom_background_revision": 0,
+                                **IMAGE_ADJUSTMENT_DEFAULTS,
+                            },
+                        })
+                        added_ids.append(item_id)
+                        processed_signatures.add(signature)
+
+                    st.session_state["artwork_next_id"] = next_id
+                    st.session_state["_artwork_upload_processed_signatures"] = sorted(processed_signatures)
+
+                    if added_ids and selected_before_upload not in existing_ids_before_upload:
+                        st.session_state["artwork_selected_id"] = added_ids[0]
+
+                    if failures:
+                        st.warning(
+                            f"{len(failures)} arquivo(s) apresentaram problema. Os arquivos válidos foram adicionados; "
+                            "os que falharam continuam no seletor para nova tentativa."
+                        )
+                        with st.expander("Ver arquivos que precisam de atenção", expanded=True):
+                            for file_name, reason in failures:
+                                st.error(f"{file_name}: {reason}")
+                    else:
+                        # Só limpa o seletor quando todos os arquivos pendentes foram
+                        # processados. Isso evita perder a lista se um arquivo falhar.
+                        st.session_state["artwork_upload_revision"] += 1
+                        st.session_state["_artwork_upload_processed_signatures"] = []
+                        if added_ids:
+                            st.toast(f"{len(added_ids)} imagem(ns) adicionada(s) ao Pool.", icon="✅")
+                        st.rerun()
         _render_mobile_upload_panel(spec)
 
     if isinstance(st.session_state.get("_mobile_upload_session"), dict):
@@ -8158,6 +8581,79 @@ def main():
                         key=f"guide_single_{guide.key}",
                     )
 
+        project_shape_name = "quadrado" if spec.shape == "square" else "redondo"
+        project_size_name = f"{spec.size:g}x{spec.size:g}mm" if spec.shape == "square" else f"{spec.size:g}mm"
+        project_name = f"atomica_projeto_{project_shape_name}_{project_size_name}_{len(st.session_state.get('artwork_items', []))}artes.atp"
+        project_settings = {
+            "size_key": size_key,
+            "shape": spec.shape,
+            "cut_diameter": float(spec.cut),
+            "cut_diameter_overrides": {
+                str(key): float(value)
+                for key, value in st.session_state.get("_cut_diameter_overrides", {}).items()
+                if key in BUTTONS
+            },
+            "paper_size": paper,
+            "page_orientation": orient,
+            "custom_page_w": float(st.session_state.get("custom_page_w", 210.0)),
+            "custom_page_h": float(st.session_state.get("custom_page_h", 297.0)),
+            "page_w": float(page_w),
+            "page_h": float(page_h),
+            "margin_mm": float(margin),
+            "gap_mm": float(gap),
+            "layout_label": str(layout_label),
+            "guides": list(guides),
+            "selected_id": st.session_state.get("artwork_selected_id"),
+        }
+
+        with st.container(border=True):
+            brand.section_title(None, "SALVAR PROJETO", brand.CYAN)
+            st.caption(
+                "Salve um arquivo .atp para continuar editando depois. Ele preserva o Pool, "
+                "as imagens originais, os fundos e as configurações, sem gerar uma folha PDF."
+            )
+            if st.button(
+                "Preparar arquivo de projeto (.atp)",
+                disabled=not bool(st.session_state.get("artwork_items")),
+                key="prepare_atomica_atp_project",
+                use_container_width=True,
+            ):
+                selected_for_save = st.session_state.get("artwork_selected_id")
+                if selected_for_save is not None:
+                    _commit_artwork_editor_state(int(selected_for_save))
+                try:
+                    with st.spinner("Compactando o projeto e organizando os arquivos…"):
+                        atp_bytes = build_atomica_project_archive(
+                            st.session_state["artwork_items"], project_settings
+                        )
+                    st.session_state["_atp_project_export"] = {
+                        "bytes": atp_bytes,
+                        "name": project_name,
+                        "signature": atomica_project_export_signature(
+                            st.session_state["artwork_items"], project_settings
+                        ),
+                    }
+                    st.toast("Arquivo de projeto preparado. Agora você pode baixá-lo.", icon="✅")
+                except Exception as exc:
+                    st.toast(str(exc) or "Não foi possível preparar o arquivo .atp.", icon="⚠️")
+
+            atp_signature = atomica_project_export_signature(
+                st.session_state.get("artwork_items", []), project_settings
+            )
+            stored_atp = st.session_state.get("_atp_project_export")
+            if stored_atp and stored_atp.get("signature") == atp_signature:
+                st.download_button(
+                    f"⬇️ Baixar projeto .atp ({len(stored_atp['bytes']) / 1e6:.1f} MB)",
+                    stored_atp["bytes"],
+                    file_name=stored_atp["name"],
+                    mime="application/octet-stream",
+                    type="primary",
+                    key="download_atomica_atp_project",
+                    use_container_width=True,
+                )
+            elif stored_atp:
+                st.info("O projeto mudou desde o último arquivo .atp. Prepare um novo arquivo para salvar as alterações.")
+
         with st.container(border=True, key="sheet_canvas_panel"):
             brand.section_title(None, "PRÉVIA DA FOLHA", brand.MAGENTA)
             positions = compute_layout(page_w, page_h, spec.cut, margin, gap, mode)
@@ -8284,6 +8780,7 @@ def main():
                     sheet_preview_image = render_mixed_sheet_preview_cached(
                         preview_payload, preview_placements_tuple, spec,
                         page_w, page_h, bg, tuple(guides),
+                        footer_margin_mm=float(margin),
                     )
                     st.image(
                         sheet_preview_image,
@@ -8321,6 +8818,7 @@ def main():
                             preview_payload, preview_placements_tuple, spec,
                             page_w, page_h, bg, tuple(guides),
                             preview_ppm=real_size_ppm,
+                            footer_margin_mm=float(margin),
                         )
                         real_size_buffer = io.BytesIO()
                         real_size_image.save(real_size_buffer, format="WEBP", quality=92, method=1)
@@ -8374,9 +8872,12 @@ def main():
                                     if entry["background_image_bytes"] and entry["background_image_digest"] else None
                                 )
                                 pdf_items.append(pdf_entry)
+                            # PDF convencional: somente conteúdo de impressão, sem anexar
+                            # imagens originais nem manifesto. O projeto editável é salvo à parte em .atp.
                             pdf = build_art_batch_pdf(
                                 pdf_items, positions, page_w, page_h, total_qty,
                                 bg=bg, guides=guides,
+                                page_margin_mm=float(margin),
                             )
                         pdf_base64 = base64.b64encode(pdf).decode("ascii")
                         st.session_state["pdf"] = {
@@ -8390,6 +8891,7 @@ def main():
                             stored["bytes"], file_name=stored["name"], mime="application/pdf", type="primary",
                             key="download_art_batch_pdf",
                         )
+                        st.caption("Este PDF é destinado à impressão. Para guardar e reabrir o Pool e as configurações, salve também o arquivo de projeto .atp acima.")
                         pdf_print = get_pdf_print_component()
                         pdf_print(
                             data={
